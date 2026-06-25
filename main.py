@@ -7,6 +7,7 @@ import os
 INPUT_FILE = os.getenv('INPUT_FILE', r'c:\_Work\ML\AggregatedProfits\2026.06.23.txt')
 OUTPUT_GRAPH = os.getenv('OUTPUT_GRAPH', r'c:\_Work\ML\AggregatedProfits\plot.png')
 N_SECONDS = int(os.getenv('N_SECONDS', 10))
+PROFIT_Y_LIMIT = os.getenv('PROFIT_Y_LIMIT', None) # Set as tuple (min, max) or None
 # ---------------------
 
 def analyze_profits(input_path, output_path, n_seconds):
@@ -79,6 +80,15 @@ def analyze_profits(input_path, output_path, n_seconds):
     ax2.legend(loc='upper right')
     ax2.grid(True, which='both', linestyle='--', alpha=0.5)
     ax2.xaxis.grid(True, which='major', color='gray', linestyle='-', alpha=0.3)
+
+    if PROFIT_Y_LIMIT is not None:
+        try:
+            # Expecting string format like "(min,max)" from ENV
+            limits = eval(PROFIT_Y_LIMIT)
+            if isinstance(limits, (tuple, list)) and len(limits) == 2:
+                ax2.set_ylim(limits[0], limits[1])
+        except Exception as e:
+            print(f"Warning: Could not parse PROFIT_Y_LIMIT '{PROFIT_Y_LIMIT}': {e}")
 
     plt.xticks(rotation=45)
     plt.xlabel('Time')

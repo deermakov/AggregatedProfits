@@ -9,4 +9,5 @@ services:
     environment:
       - INPUT_FILE=/app/data/2026.06.23.txt
       - OUTPUT_GRAPH=/app/data/plot.png
-      - N_SECONDS=10
+      - N_SECONDS=60
+      - PROFIT_Y_LIMIT=(-50000, 50000)
