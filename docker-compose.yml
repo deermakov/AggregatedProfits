@@ -1,0 +1,12 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  analyzer:
+    build: .
+    volumes:
+      - .:/app/data
+    environment:
+      - INPUT_FILE=/app/data/2026.06.23.txt
+      - OUTPUT_GRAPH=/app/data/plot.png
+      - N_SECONDS=10
