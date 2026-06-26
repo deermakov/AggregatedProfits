@@ -1,13 +1,12 @@
-# docker-compose.yml
 version: '3.8'
 
 services:
-  analyzer:
+  aggregator:
     build: .
     volumes:
       - .:/app/data
     environment:
-      - INPUT_FILE=/app/data/2026.06.23.txt
-      - OUTPUT_GRAPH=/app/data/plot.png
+      - INPUT_FILE=/app/data/2026.06.26.txt
+      - OUTPUT_FILE=/app/data/chart.png
       - N_SECONDS=60
-      - PROFIT_Y_LIMIT=(-50000, 50000)
+      - CANDLE_WIDTH_PX=15
