@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
+import numpy as np
 
 def run_aggregation(input_file, output_image, interval_seconds):
     # 1. Load data
@@ -63,14 +64,37 @@ def run_aggregation(input_file, output_image, interval_seconds):
              ax.add_patch(rect)
 
     # Formatting X axis to show time instead of indices
-    # We'll pick a subset of indices to display labels so they don't overlap too much
-    step = max(1, num_candles // 10)
-    tick_indices = list(range(0, num_candles, step))
-    if tick_indices[-1] != num_candles - 1:
-        tick_indices.append(num_candles - 1)
+    # We want time labels at the boundaries of the hours (where our vertical lines are)
+    all_timestamps = resampled.index
+    if not all_timestamps.empty:
+        unique_hours = np.sort(all_timestamps.hour.unique())
         
-    ax.set_xticks(tick_indices)
-    ax.set_xticklabels([resampled.index[i].strftime('%H:%M:%S') for i in tick_indices], rotation=45)
+        hour_tick_indices = []
+        hour_tick_labels = []
+
+        for h in unique_hours:
+            idx_list = np.where(all_timestamps.hour == h)[0]
+            if len(idx_list) > 0:
+                first_index_of_hour = idx_list[0]
+                # Position of the line
+                line_pos = first_index_of_hour - 0.5
+                
+                # If we are not at the very start of the chart, we can put a label there
+                # We use the timestamp of the actual candle that starts this hour for the label
+                if line_pos >= -0.5:
+                    hour_tick_indices.append(line_pos)
+                    # Label will be the time of the first candle of that hour
+                    hour_tick_labels.append(resampled.index[first_index_of_hour].strftime('%H:%M:%S'))
+
+        if hour_tick_indices:
+            ax.set_xticks(hour_tick_indices)
+            ax.set_xticklabels(hour_tick_labels, rotation=45)
+    else:
+        # Fallback if no data
+        step = max(1, num_candles // 10)
+        tick_indices = list(range(0, num_candles, step))
+        ax.set_xticks(tick_indices)
+        ax.set_xticklabels([resampled.index[i].strftime('%H:%M:%S') for i in tick_indices], rotation=45)
 
     ax.set_title(f"OHLC Chart - Interval {interval_seconds}s")
     ax.set_xlabel("Time")
@@ -78,7 +102,19 @@ def run_aggregation(input_file, output_image, interval_seconds):
     
     # Добавление сетки
     ax.grid(True, which='both', linestyle='--', linewidth=1, alpha=1)
+
+    # Вторая ось Y справа
+    ax.tick_params(axis='y', labelright=True)
     
+    # Вертикальные линии сетки привязаны к границам часовых интервалов
+    if not all_timestamps.empty:
+        unique_hours = np.sort(all_timestamps.hour.unique())
+        for h in unique_hours:
+            idx_list = np.where(all_timestamps.hour == h)[0]
+            if len(idx_list) > 0:
+                first_index_of_hour = idx_list[0]
+                ax.axvline(x=first_index_of_hour - 0.5, color='gray', linestyle='-', linewidth=1, alpha=0.5)
+
     # Set limits to show all candles correctly
     ax.set_xlim(-0.5, num_candles - 0.5)
     
