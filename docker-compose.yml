@@ -4,9 +4,9 @@ services:
   aggregator:
     build: .
     volumes:
-      - .:/app/data
+      - .:/data
+      - .:/output
     environment:
-      - INPUT_FILE=/app/data/2026.06.26.txt
-      - OUTPUT_FILE=/app/data/chart.png
-      - N_SECONDS=60
-      - CANDLE_WIDTH_PX=15
+      - INPUT_FILE=/data/2026.06.26.txt
+      - OUTPUT_FILE=/output/chart.png
+      - INTERVAL_N=300
