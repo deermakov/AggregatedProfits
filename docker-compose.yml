@@ -4,9 +4,10 @@ services:
   aggregator:
     build: .
     volumes:
-      - .:/data
-      - .:/output
+      - .:/app/data
     environment:
-      - INPUT_FILE=/data/2026.06.26.txt
-      - OUTPUT_FILE=/output/chart.png
-      - INTERVAL_N=300
+      - INPUT_FILE=/app/data/2026.06.26.txt
+      - OUTPUT_IMAGE=/app/data/result_chart.png
+      - TIME_STEP_SEC=10
+      - PRICE_STEP=10
+      - PERCENTILE_GRID_SIZE=10
