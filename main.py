@@ -12,12 +12,13 @@ def get_paths():
     # Default paths if not provided via environment variables
     input_file = os.environ.get('INPUT_FILE', '/app/data/2026.06.23.txt')
     output_image = os.environ.get('OUTPUT_IMAGE', '/app/data/result_chart.png')
+    output_text = os.environ.get('OUTPUT_TEXT', '/app/data/cells_data.txt')
     time_step = float(os.environ.get('TIME_STEP_SEC', 1))
     price_step = float(os.environ.get('PRICE_STEP', 1))
     percentile_grid = int(os.environ.get('PERCENTILE_GRID_SIZE', 10))
-    return input_file, output_image, time_step, price_step, percentile_grid
+    return input_file, output_image, output_text, time_step, price_step, percentile_grid
 
-INPUT_FILE, OUTPUT_IMAGE, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE = get_paths()
+INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE = get_paths()
 
 def process_data(input_path, time_step, price_step, percentile_grid):
     # Load data
@@ -26,7 +27,7 @@ def process_data(input_path, time_step, price_step, percentile_grid):
     # Combine time and msec to get proper datetime.
     # Since there is no date in the file, we'll use a placeholder date (e.g., 2026-06-23)
     df['datetime'] = pd.to_datetime('2026-06-23 ' + df['TRADETIME']) + \
-                     pd.to_timedelta(df['TRADETIME_MSEC'], unit='ms')
+                     pd.to_timedelta(df['TRADETIME_MSEC'], unit='us')
 
     # 1. & 2. Grid aggregation
     # Use timestamp for time grid to handle calculations easily
@@ -112,6 +113,20 @@ def get_colors(values, grid_size, cmap_name='viridis'):
 
     return colors
 
+def save_cells_to_txt(pivot_df, start_time, output_path):
+    """Сохраняет непустые ячейки BUY и SELL в текстовый файл."""
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write("Type\tStartTime\tMinPrice\tTotalVolume\n")
+        for _, row in pivot_df.iterrows():
+            t_ts = row['time_grid_ts']
+            p = row['price_grid']
+            start_dt = datetime.fromtimestamp(t_ts).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            
+            if row['BUY'] > 0:
+                f.write(f"BUY\t{start_dt}\t{p:.2f}\t{row['BUY']:.6f}\n")
+            if row['SELL'] > 0:
+                f.write(f"SELL\t{start_dt}\t{p:.2f}\t{row['SELL']:.6f}\n")
+
 def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_grid):
     if pivot_df.empty:
         print("No data to plot.")
@@ -184,6 +199,8 @@ if __name__ == "__main__":
         try:
             df_pivot, start_t, end_t = process_data(INPUT_FILE, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
             plot_data(df_pivot, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
+            save_cells_to_txt(df_pivot, start_t, OUTPUT_TEXT)
+            print(f"Cells data saved to {OUTPUT_TEXT}")
         except Exception as e:
             print(f"An error occurred: {e}")
             import traceback
