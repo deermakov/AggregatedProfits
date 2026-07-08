@@ -54,16 +54,14 @@ def process_data(input_path, time_step, price_step, percentile_grid):
 def get_colors(values, grid_size, cmap_name='viridis'):
     """Вычисляет цвета для ячеек heatmap.
 
-    Использует perceptually uniform colormap (viridis / magma) и логарифмическую
-    нормализацию индексов, чтобы мелкие объёмы не «зашкаливали» по яркости,
-    а крупные — чётко выделялись.
-
     Параметры
     ----------
     values : array-like
         Объёмы (QTY) по ячейкам сетки.
     grid_size : int
-        Количество перцентильных бакетов.
+        Размер одного фрагмента распределения в перцентилях.
+        Например, если grid_size=20, то всё распределение делится на 5 частей по 20 перцентилей каждая.
+        Количество цветов в палитре будет равно 100 // grid_size.
     cmap_name : str
         Имя matplotlib colormap. 'viridis' — для BUY, 'magma' — для SELL.
 
@@ -78,38 +76,42 @@ def get_colors(values, grid_size, cmap_name='viridis'):
     if len(non_zero_vals) == 0:
         return [(0, 0, 0, 0)] * len(values)
 
-    # --- 1. Перцентильные пороги по ненулевым значениям ---
-    quantiles = np.linspace(0, 1, grid_size + 1)
+    # --- 1. Расчет количества цветов и шага перцентилей ---
+    # PERCENTILE_GRID_SIZE определяет количество перцентилей в одном фрагменте (бакете).
+    # Всего 100 перцентилей. Значит, количество цветовых групп = 100 / grid_size.
+    num_colors = 100 // grid_size
+    if num_colors < 1:
+        num_colors = 1 # Защита от слишком большого grid_size
+
+    # --- 2. Перцентильные пороги ---
+    # Мы делим распределение на num_colors равных частей по grid_size перцентилей.
+    # Но для корректного разбиения по квантилям matplotlib/numpy удобнее использовать
+    # прямую связь с количеством цветов.
+    quantiles = np.linspace(0, 1, num_colors + 1)
     thresholds = np.quantile(non_zero_vals, quantiles)
 
-    # --- 2. Определяем бакет-индекс для каждого значения ---
+    # --- 3. Определяем бакет-индекс для каждого значения ---
     indices = []
     for v in values:
         if v <= 0:
             indices.append(-1)
         else:
+            # Находим в каком интервале лежит значение
             idx = int(np.searchsorted(thresholds, v, side='right') - 1)
-            idx = max(0, min(idx, grid_size - 1))
+            idx = max(0, min(idx, num_colors - 1))
             indices.append(idx)
 
-    # --- 3. Perceptually uniform colormap ---
+    # --- 4. Colormap ---
     cmap = plt.get_cmap(cmap_name)
-
-    # --- 4. Логарифмическая нормализация индекса в [0, 1] ---
-    #    log1p сглаживает переход: первые бакеты остаются тёмными,
-    #    последние — ярко выражены. Без логарифма линейная шкала
-    #    делает даже средние квантили слишком яркими.
-    max_idx = grid_size - 1
-    log_max = np.log1p(max_idx)
 
     colors = []
     for idx in indices:
         if idx == -1:
             colors.append((0, 0, 0, 0)) # Transparent/None
         else:
-            # Normalize index to [0, 1] for colormap
-            colors.append(cmap(idx / (grid_size - 1) if grid_size > 1 else 0))
-            
+            # Нормализуем индекс для получения цвета из colormap [0, 1]
+            color_val = idx / (num_colors - 1) if num_colors > 1 else 0.5
+            colors.append(cmap(color_val))
 
     return colors
 
@@ -161,30 +163,60 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     ax2.set_xlim(start_ts, end_ts)
     ax2.set_ylim(min_p - price_step, max_p + price_step)
 
-    # Vertical lines at whole hours
-    current_hour = datetime.fromtimestamp(start_ts).replace(minute=0, second=0, microsecond=0)
-    end_hour = datetime.fromtimestamp(end_ts).replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    # Vertical lines at whole hours (or 10 minutes/1 hour based on TIME_STEP_SEC)
+    if time_step < 600:
+        time_interval = timedelta(minutes=10)
+    else:
+        time_interval = timedelta(hours=1)
+
+    current_time = datetime.fromtimestamp(start_ts).replace(second=0, microsecond=0)
+    # Align current_time to the interval
+    if time_interval == timedelta(minutes=10):
+        # minutes must be multiple of 10
+        minute = (current_time.minute // 10) * 10
+        current_time = current_time.replace(minute=minute)
+    else:
+        current_time = current_time.replace(hour=(current_time.hour), minute=0)
+
+    end_time_dt = datetime.fromtimestamp(end_ts)
     
-    hour_ticks = []
-    while current_hour <= end_hour:
-        ts = current_hour.timestamp()
+    time_ticks = []
+    while current_time <= end_time_dt:
+        ts = current_time.timestamp()
         if start_ts <= ts <= end_ts:
-            hour_ticks.append(ts)
-        current_hour += timedelta(hours=1)
+            time_ticks.append(ts)
+        current_time += time_interval
     
-    ax2.set_xticks(hour_ticks)
-    ax2.set_xticklabels([datetime.fromtimestamp(t).strftime('%H:%M') for t in hour_ticks], rotation=45)
+    # Add boundary ticks if they are not included but within range
+    if start_ts > time_ticks[0] if time_ticks else False: # This is a bit simplified
+         pass # In practice, we might want to ensure the very first tick is visible
+
+    ax2.set_xticks(time_ticks)
+    # For 10 min intervals, show HH:MM. For hours, show HH:00 or similar.
+    ax2.set_xticklabels([datetime.fromtimestamp(t).strftime('%H:%M') for t in time_ticks], rotation=45)
     
-    # Horizontal lines (Price grid)
-    price_ticks = np.linspace(min_p, max_p, 20) # Reasonable number of ticks
+    # Horizontal lines (Price grid) - multiples of 100
+    # Find the first multiple of 100 >= min_p and last <= max_p
+    start_price_tick = np.floor(min_p / 100) * 100
+    end_price_tick = np.ceil(max_p / 100) * 100
+    price_ticks = np.arange(start_price_tick, end_price_tick + 100, 100)
+    
+    # Filter price_ticks to only include those within the visible range (or slightly outside for grid effect)
     ax1.set_yticks(price_ticks)
     ax2.set_yticks(price_ticks)
 
-    ax1.grid(True, which='both', axis='both', linestyle='--', alpha=0.5)
+    ax1.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
+
+    # Add price ticks on the right side for ax1
+    ax1.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
+
     ax1.set_ylabel("Price (BUY)")
     ax1.set_title(f"Aggregated Profits Heatmap (Step: {time_step}s, {price_step} pts)")
 
-    ax2.grid(True, which='both', axis='both', linestyle='--', alpha=0.5)
+    ax2.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
+    # Add price ticks on the right side for ax2
+    ax2.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
+
     ax2.set_xlabel("Time")
     ax2.set_ylabel("Price (SELL)")
 
