@@ -139,7 +139,19 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     buy_colors = get_colors(pivot_df['BUY'].values, percentile_grid, cmap_name='viridis')
     sell_colors = get_colors(pivot_df['SELL'].values, percentile_grid, cmap_name='inferno')
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 14), sharex=True)
+    start_ts = start_time.timestamp()
+    end_ts = end_time.timestamp()
+
+    # Calculate figsize based on the number of time intervals to keep width per interval constant.
+    # Let's try: 0.1 inch per 60 seconds (1 minute).
+    width_per_second = 0.1 / 60.0  # inches per second
+    calculated_width = (end_ts - start_ts) * width_per_second
+    
+    # Ensure a minimum width and reasonable aspect ratio
+    final_width = max(12, calculated_width)
+    final_height = 14
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(final_width, final_height), sharex=True)
 
     for i, row in pivot_df.iterrows():
         t_ts = row['time_grid_ts']
@@ -153,8 +165,6 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
             rect_sell = plt.Rectangle((t_ts, p), time_step, price_step, facecolor=sell_colors[i], edgecolor='none')
             ax2.add_patch(rect_sell)
 
-    start_ts = start_time.timestamp()
-    end_ts = end_time.timestamp()
     min_p = pivot_df['price_grid'].min()
     max_p = pivot_df['price_grid'].max()
 
