@@ -13,12 +13,13 @@ def get_paths():
     input_file = os.environ.get('INPUT_FILE', '/app/data/2026.06.23.txt')
     output_image = os.environ.get('OUTPUT_IMAGE', '/app/data/result_chart.png')
     output_text = os.environ.get('OUTPUT_TEXT', '/app/data/cells_data.txt')
+    output_image_aggregated = os.environ.get('OUTPUT_IMAGE_AGGREGATED', '/app/data/result_chart_aggregated.png')
     time_step = float(os.environ.get('TIME_STEP_SEC', 1))
     price_step = float(os.environ.get('PRICE_STEP', 1))
     percentile_grid = int(os.environ.get('PERCENTILE_GRID_SIZE', 10))
-    return input_file, output_image, output_text, time_step, price_step, percentile_grid
+    return input_file, output_image, output_text, output_image_aggregated, time_step, price_step, percentile_grid
 
-INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE = get_paths()
+INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, OUTPUT_IMAGE_AGGREGATED, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE = get_paths()
 
 def process_data(input_path, time_step, price_step, percentile_grid):
     # Load data
@@ -51,24 +52,70 @@ def process_data(input_path, time_step, price_step, percentile_grid):
 
     return pivot_df, df['datetime'].min(), df['datetime'].max()
 
-def get_colors(values, grid_size, cmap_name='viridis'):
-    """Вычисляет цвета для ячеек heatmap.
-
-    Параметры
-    ----------
-    values : array-like
-        Объёмы (QTY) по ячейкам сетки.
-    grid_size : int
-        Размер одного фрагмента распределения в перцентилях.
-        Например, если grid_size=20, то всё распределение делится на 5 частей по 20 перцентилей каждая.
-        Количество цветов в палитре будет равно 100 // grid_size.
-    cmap_name : str
-        Имя matplotlib colormap. 'viridis' — для BUY, 'magma' — для SELL.
-
-    Возвращает
-    ----------
-    list of RGBA tuples
+def aggregate_cells(pivot_df, time_step):
     """
+    Aggregates adjacent horizontal cells with non-zero volume into a single cell.
+    """
+    if pivot_df.empty:
+        return pivot_df
+
+    # Sort by price and then by timestamp to ensure we process rows in order
+    df = pivot_df.sort_values(['price_grid', 'time_grid_ts']).copy()
+    
+    new_rows = []
+    
+    for price, group in df.groupby('price_grid'):
+        group = group.sort_values('time_grid_ts')
+        
+        i = 0
+        n = len(group)
+        while i < n:
+            current_row = group.iloc[i]
+            total_vol = current_row['BUY'] + current_row['SELL']
+            
+            if total_vol > 0:
+                # Start a new aggregated cell
+                start_idx = i
+                end_idx = i
+                
+                # Try to extend this group horizontally (temporally)
+                while end_idx + 1 < n:
+                    next_row = group.iloc[end_idx + 1]
+                    next_total_vol = next_row['BUY'] + next_row['SELL']
+                    
+                    # Check if it's the immediate next cell in time
+                    if next_row['time_grid_ts'] <= group.iloc[end_idx]['time_grid_ts'] + time_step:
+                        if next_total_vol > 0:
+                            end_idx += 1
+                        else:
+                            break
+                    else:
+                        break
+                
+                # We have a group from start_idx to end_idx
+                group_rows = group.iloc[start_idx : end_idx + 1]
+                agg_row = {
+                    'time_grid_ts': group_rows['time_grid_ts'].min(),
+                    'price_grid': price,
+                    'BUY': group_rows['BUY'].sum(),
+                    'SELL': group_rows['SELL'].sum(),
+                    'width_cells': len(group_rows) # Number of elementary cells it spans
+                }
+                new_rows.append(agg_row)
+                i = end_idx + 1
+            else:
+                # Zero volume cell, just keep it as is
+                new_rows.append(current_row.to_dict())
+                i += 1
+
+    agg_df = pd.DataFrame(new_rows)
+    if 'width_cells' not in agg_df.columns:
+        agg_df['width_cells'] = 1
+        
+    return agg_df
+
+def get_colors(values, grid_size, cmap_name='viridis'):
+    """Вычисляет цвета для ячеек heatmap."""
     if len(values) == 0:
         return []
 
@@ -76,40 +123,29 @@ def get_colors(values, grid_size, cmap_name='viridis'):
     if len(non_zero_vals) == 0:
         return [(0, 0, 0, 0)] * len(values)
 
-    # --- 1. Расчет количества цветов и шага перцентилей ---
-    # PERCENTILE_GRID_SIZE определяет количество перцентилей в одном фрагменте (бакете).
-    # Всего 100 перцентилей. Значит, количество цветовых групп = 100 / grid_size.
     num_colors = 100 // grid_size
     if num_colors < 1:
-        num_colors = 1 # Защита от слишком большого grid_size
+        num_colors = 1
 
-    # --- 2. Перцентильные пороги ---
-    # Мы делим распределение на num_colors равных частей по grid_size перцентилей.
-    # Но для корректного разбиения по квантилям matplotlib/numpy удобнее использовать
-    # прямую связь с количеством цветов.
     quantiles = np.linspace(0, 1, num_colors + 1)
     thresholds = np.quantile(non_zero_vals, quantiles)
 
-    # --- 3. Определяем бакет-индекс для каждого значения ---
     indices = []
     for v in values:
         if v <= 0:
             indices.append(-1)
         else:
-            # Находим в каком интервале лежит значение
             idx = int(np.searchsorted(thresholds, v, side='right') - 1)
             idx = max(0, min(idx, num_colors - 1))
             indices.append(idx)
 
-    # --- 4. Colormap ---
     cmap = plt.get_cmap(cmap_name)
 
     colors = []
     for idx in indices:
         if idx == -1:
-            colors.append((0, 0, 0, 0)) # Transparent/None
+            colors.append((0, 0, 0, 0))
         else:
-            # Нормализуем индекс для получения цвета из colormap [0, 1]
             color_val = idx / (num_colors - 1) if num_colors > 1 else 0.5
             colors.append(cmap(color_val))
 
@@ -129,25 +165,19 @@ def save_cells_to_txt(pivot_df, start_time, output_path):
             if row['SELL'] > 0:
                 f.write(f"SELL\t{start_dt}\t{p:.2f}\t{row['SELL']:.6f}\n")
 
-def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_grid):
+def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_grid, output_path=None):
     if pivot_df.empty:
         print("No data to plot.")
         return
 
-    # viridis  — perceptually uniform, тёмный→светлый (BUY)
-    # magma    — perceptually uniform, тёмный→светлый (SELL)
     buy_colors = get_colors(pivot_df['BUY'].values, percentile_grid, cmap_name='viridis')
     sell_colors = get_colors(pivot_df['SELL'].values, percentile_grid, cmap_name='inferno')
 
     start_ts = start_time.timestamp()
     end_ts = end_time.timestamp()
 
-    # Calculate figsize based on the number of time intervals to keep width per interval constant.
-    # Let's try: 0.1 inch per 60 seconds (1 minute).
     width_per_second = 0.1 / 60.0  # inches per second
     calculated_width = (end_ts - start_ts) * width_per_second
-    
-    # Ensure a minimum width and reasonable aspect ratio
     final_width = max(12, calculated_width)
     final_height = 14
     
@@ -156,13 +186,14 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     for i, row in pivot_df.iterrows():
         t_ts = row['time_grid_ts']
         p = row['price_grid']
-        
+        width = time_step * row.get('width_cells', 1)
+
         if row['BUY'] > 0:
-            rect_buy = plt.Rectangle((t_ts, p), time_step, price_step, facecolor=buy_colors[i], edgecolor='none')
+            rect_buy = plt.Rectangle((t_ts, p), width, price_step, facecolor=buy_colors[i], edgecolor='none')
             ax1.add_patch(rect_buy)
                 
         if row['SELL'] > 0:
-            rect_sell = plt.Rectangle((t_ts, p), time_step, price_step, facecolor=sell_colors[i], edgecolor='none')
+            rect_sell = plt.Rectangle((t_ts, p), width, price_step, facecolor=sell_colors[i], edgecolor='none')
             ax2.add_patch(rect_sell)
 
     min_p = pivot_df['price_grid'].min()
@@ -173,23 +204,19 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     ax2.set_xlim(start_ts, end_ts)
     ax2.set_ylim(min_p - price_step, max_p + price_step)
 
-    # Vertical lines at whole hours (or 10 minutes/1 hour based on TIME_STEP_SEC)
     if time_step < 600:
         time_interval = timedelta(minutes=10)
     else:
         time_interval = timedelta(hours=1)
 
     current_time = datetime.fromtimestamp(start_ts).replace(second=0, microsecond=0)
-    # Align current_time to the interval
     if time_interval == timedelta(minutes=10):
-        # minutes must be multiple of 10
         minute = (current_time.minute // 10) * 10
         current_time = current_time.replace(minute=minute)
     else:
         current_time = current_time.replace(hour=(current_time.hour), minute=0)
 
     end_time_dt = datetime.fromtimestamp(end_ts)
-    
     time_ticks = []
     while current_time <= end_time_dt:
         ts = current_time.timestamp()
@@ -197,42 +224,30 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
             time_ticks.append(ts)
         current_time += time_interval
     
-    # Add boundary ticks if they are not included but within range
-    if start_ts > time_ticks[0] if time_ticks else False: # This is a bit simplified
-         pass # In practice, we might want to ensure the very first tick is visible
-
     ax2.set_xticks(time_ticks)
-    # For 10 min intervals, show HH:MM. For hours, show HH:00 or similar.
     ax2.set_xticklabels([datetime.fromtimestamp(t).strftime('%H:%M') for t in time_ticks], rotation=45)
     
-    # Horizontal lines (Price grid) - multiples of 100
-    # Find the first multiple of 100 >= min_p and last <= max_p
     start_price_tick = np.floor(min_p / 100) * 100
     end_price_tick = np.ceil(max_p / 100) * 100
     price_ticks = np.arange(start_price_tick, end_price_tick + 100, 100)
     
-    # Filter price_ticks to only include those within the visible range (or slightly outside for grid effect)
     ax1.set_yticks(price_ticks)
     ax2.set_yticks(price_ticks)
 
     ax1.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
-
-    # Add price ticks on the right side for ax1
     ax1.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
-
     ax1.set_ylabel("Price (BUY)")
     ax1.set_title(f"Aggregated Profits Heatmap (Step: {time_step}s, {price_step} pts)")
 
     ax2.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
-    # Add price ticks on the right side for ax2
     ax2.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
-
     ax2.set_xlabel("Time")
     ax2.set_ylabel("Price (SELL)")
 
     plt.tight_layout()
-    plt.savefig(OUTPUT_IMAGE)
-    print(f"Graph saved to {OUTPUT_IMAGE}")
+    target_path = output_path if output_path else OUTPUT_IMAGE
+    plt.savefig(target_path)
+    print(f"Graph saved to {target_path}")
 
 if __name__ == "__main__":
     if not os.path.exists(INPUT_FILE):
@@ -243,6 +258,12 @@ if __name__ == "__main__":
             plot_data(df_pivot, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
             save_cells_to_txt(df_pivot, start_t, OUTPUT_TEXT)
             print(f"Cells data saved to {OUTPUT_TEXT}")
+
+            print("Running aggregated version...")
+            df_agg = aggregate_cells(df_pivot, TIME_STEP_SEC)
+            plot_data(df_agg, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, output_path=OUTPUT_IMAGE_AGGREGATED)
+            print(f"Aggregated graph saved to {OUTPUT_IMAGE_AGGREGATED}")
+
         except Exception as e:
             print(f"An error occurred: {e}")
             import traceback
