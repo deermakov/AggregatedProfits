@@ -6,8 +6,8 @@ services:
     volumes:
       - .:/app/data
     environment:
-      - INPUT_FILE=/app/data/2026.06.26.txt
+      - INPUT_FILE=/app/data/2026.08.20.txt
       - OUTPUT_IMAGE=/app/data/result_chart.png
-      - TIME_STEP_SEC=10
+      - TIME_STEP_SEC=60
       - PRICE_STEP=10
-      - PERCENTILE_GRID_SIZE=10
+      - PERCENTILE_GRID_SIZE=1
