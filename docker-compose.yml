@@ -11,3 +11,4 @@ services:
       - TIME_STEP_SEC=60
       - PRICE_STEP=10
       - PERCENTILE_GRID_SIZE=1
+      - START_TIME=10:00:00

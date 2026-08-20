@@ -17,11 +17,12 @@ def get_paths():
     time_step = float(os.environ.get('TIME_STEP_SEC', 1))
     price_step = float(os.environ.get('PRICE_STEP', 1))
     percentile_grid = int(os.environ.get('PERCENTILE_GRID_SIZE', 10))
-    return input_file, output_image, output_text, output_image_aggregated, time_step, price_step, percentile_grid
+    start_time_str = os.environ.get('START_TIME', '') # Format: 'HH:MM:SS'
+    return input_file, output_image, output_text, output_image_aggregated, time_step, price_step, percentile_grid, start_time_str
 
-INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, OUTPUT_IMAGE_AGGREGATED, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE = get_paths()
+INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, OUTPUT_IMAGE_AGGREGATED, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, START_TIME_STR = get_paths()
 
-def process_data(input_path, time_step, price_step, percentile_grid):
+def process_data(input_path, time_step, price_step, percentile_grid, start_time=None):
     # Load data
     df = pd.read_csv(input_path, sep='\t')
     
@@ -29,6 +30,13 @@ def process_data(input_path, time_step, price_step, percentile_grid):
     # Since there is no date in the file, we'll use a placeholder date (e.g., 2026-06-23)
     df['datetime'] = pd.to_datetime('2026-06-23 ' + df['TRADETIME']) + \
                      pd.to_timedelta(df['TRADETIME_MSEC'], unit='us')
+
+    # Filter data by start time if provided
+    if start_time is not None:
+        df = df[df['datetime'] >= start_time].copy()
+
+    if df.empty:
+        return pd.DataFrame(), None, None
 
     # 1. & 2. Grid aggregation
     # Use timestamp for time grid to handle calculations easily
@@ -254,15 +262,30 @@ if __name__ == "__main__":
         print(f"Error: Input file not found at {INPUT_FILE}")
     else:
         try:
-            df_pivot, start_t, end_t = process_data(INPUT_FILE, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
-            plot_data(df_pivot, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
-            save_cells_to_txt(df_pivot, start_t, OUTPUT_TEXT)
-            print(f"Cells data saved to {OUTPUT_TEXT}")
+            start_time_dt = None
+            if START_TIME_STR:
+                try:
+                    # Try to parse the start time from environment variable (format 'HH:MM:SS')
+                    time_obj = datetime.strptime(START_TIME_STR, '%H:%M:%S').time()
+                    # Since the data has a fixed date '2026-06-23', we combine it with the provided time
+                    start_time_dt = datetime.combine(datetime(2026, 6, 23), time_obj)
+                    print(f"Filtering data starting from: {start_time_dt}")
+                except ValueError:
+                    print(f"Warning: Invalid START_TIME format '{START_TIME_STR}'. Expected 'HH:MM:SS'.")
 
-            print("Running aggregated version...")
-            df_agg = aggregate_cells(df_pivot, TIME_STEP_SEC)
-            plot_data(df_agg, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, output_path=OUTPUT_IMAGE_AGGREGATED)
-            print(f"Aggregated graph saved to {OUTPUT_IMAGE_AGGREGATED}")
+            df_pivot, start_t, end_t = process_data(INPUT_FILE, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, start_time=start_time_dt)
+            
+            if df_pivot.empty or start_t is None:
+                print("No data available after filtering.")
+            else:
+                plot_data(df_pivot, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
+                save_cells_to_txt(df_pivot, start_t, OUTPUT_TEXT)
+                print(f"Cells data saved to {OUTPUT_TEXT}")
+
+                print("Running aggregated version...")
+                df_agg = aggregate_cells(df_pivot, TIME_STEP_SEC)
+                plot_data(df_agg, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, output_path=OUTPUT_IMAGE_AGGREGATED)
+                print(f"Aggregated graph saved to {OUTPUT_IMAGE_AGGREGATED}")
 
         except Exception as e:
             print(f"An error occurred: {e}")
