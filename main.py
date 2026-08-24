@@ -58,6 +58,9 @@ def process_data(input_path, time_step, price_step, percentile_grid, start_time=
         if col not in pivot_df.columns:
             pivot_df[col] = 0.0
 
+    # Calculate NET volume (BUY - SELL) for each elementary cell
+    pivot_df['NET'] = pivot_df['BUY'] - pivot_df['SELL']
+
     return pivot_df, df['datetime'].min(), df['datetime'].max()
 
 def aggregate_cells(pivot_df, time_step):
@@ -86,9 +89,11 @@ def aggregate_cells(pivot_df, time_step):
                 start_idx = i
                 end_idx = i
                 
-                # Try to extend this group horizontally (temporally)
+    # Try to extend this group horizontally (temporally)
                 while end_idx + 1 < n:
                     next_row = group.iloc[end_idx + 1]
+                    # A cell is non-zero if any of BUY, SELL or NET are present? 
+                    # Actually the prompt says "at least one trade" (BUY or SELL)
                     next_total_vol = next_row['BUY'] + next_row['SELL']
                     
                     # Check if it's the immediate next cell in time
@@ -107,13 +112,17 @@ def aggregate_cells(pivot_df, time_step):
                     'price_grid': price,
                     'BUY': group_rows['BUY'].sum(),
                     'SELL': group_rows['SELL'].sum(),
+                    'NET': group_rows['NET'].sum(),
                     'width_cells': len(group_rows) # Number of elementary cells it spans
                 }
                 new_rows.append(agg_row)
                 i = end_idx + 1
             else:
                 # Zero volume cell, just keep it as is
-                new_rows.append(current_row.to_dict())
+                current_dict = current_row.to_dict()
+                if 'width_cells' not in current_dict:
+                    current_dict['width_cells'] = 1
+                new_rows.append(current_dict)
                 i += 1
 
     agg_df = pd.DataFrame(new_rows)
@@ -122,12 +131,26 @@ def aggregate_cells(pivot_df, time_step):
         
     return agg_df
 
-def get_colors(values, grid_size, cmap_name='viridis'):
+def get_colors(values, grid_size, cmap_name='viridis', is_net=False):
     """Вычисляет цвета для ячеек heatmap."""
     if len(values) == 0:
         return []
 
-    non_zero_vals = values[values > 0]
+    # For NET, we only care about non-zero values. 
+    # But the prompt says "заполняться только для тех элементарных ячеек, в которых есть хотя бы одна сделка"
+    # We'll handle filtering of zero/empty cells in the plotting loop itself using alpha or just not drawing them.
+    # However, for color calculation (quantiles), we should use the values that WILL be plotted.
+
+    if not is_net:
+        non_zero_vals = values[values > 0]
+    else:
+        # For NET, a cell can have negative or positive value.
+        # We only consider cells with non-zero volume (as per requirement)
+        # But the prompt says "заполняться только для тех... в которых есть хотя бы одна сделка"
+        # This implies we should look at |NET| for color intensity? 
+        # No, usually it's just the value itself. Let's use all non-zero NET values for quantiles.
+        non_zero_vals = values[values != 0]
+
     if len(non_zero_vals) == 0:
         return [(0, 0, 0, 0)] * len(values)
 
@@ -140,12 +163,20 @@ def get_colors(values, grid_size, cmap_name='viridis'):
 
     indices = []
     for v in values:
-        if v <= 0:
-            indices.append(-1)
+        if is_net:
+            if v == 0:
+                indices.append(-1)
+            else:
+                idx = int(np.searchsorted(thresholds, v, side='right') - 1)
+                idx = max(0, min(idx, num_colors - 1))
+                indices.append(idx)
         else:
-            idx = int(np.searchsorted(thresholds, v, side='right') - 1)
-            idx = max(0, min(idx, num_colors - 1))
-            indices.append(idx)
+            if v <= 0:
+                indices.append(-1)
+            else:
+                idx = int(np.searchsorted(thresholds, v, side='right') - 1)
+                idx = max(0, min(idx, num_colors - 1))
+                indices.append(idx)
 
     cmap = plt.get_cmap(cmap_name)
 
@@ -154,6 +185,8 @@ def get_colors(values, grid_size, cmap_name='viridis'):
         if idx == -1:
             colors.append((0, 0, 0, 0))
         else:
+            # For NET with RdYlGn, we need to map thresholds to colors.
+            # Standard quantile approach works if we just use the index.
             color_val = idx / (num_colors - 1) if num_colors > 1 else 0.5
             colors.append(cmap(color_val))
 
@@ -180,6 +213,7 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
 
     buy_colors = get_colors(pivot_df['BUY'].values, percentile_grid, cmap_name='viridis')
     sell_colors = get_colors(pivot_df['SELL'].values, percentile_grid, cmap_name='inferno')
+    net_colors = get_colors(pivot_df['NET'].values, percentile_grid, cmap_name='RdYlGn', is_net=True)
 
     start_ts = start_time.timestamp()
     end_ts = end_time.timestamp()
@@ -187,9 +221,9 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     width_per_second = 0.1 / 60.0  # inches per second
     calculated_width = (end_ts - start_ts) * width_per_second
     final_width = max(12, calculated_width)
-    final_height = 14
+    final_height = 18 # Increased height for extra plot
     
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(final_width, final_height), sharex=True)
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(final_width, final_height), sharex=True)
 
     for i, row in pivot_df.iterrows():
         t_ts = row['time_grid_ts']
@@ -204,13 +238,17 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
             rect_sell = plt.Rectangle((t_ts, p), width, price_step, facecolor=sell_colors[i], edgecolor='none')
             ax2.add_patch(rect_sell)
 
+        if (row['BUY'] + row['SELL']) > 0: # at least one trade
+            rect_net = plt.Rectangle((t_ts, p), width, price_step, facecolor=net_colors[i], edgecolor='none')
+            ax3.add_patch(rect_net)
+
     min_p = pivot_df['price_grid'].min()
     max_p = pivot_df['price_grid'].max()
 
-    ax1.set_xlim(start_ts, end_ts)
-    ax1.set_ylim(min_p - price_step, max_p + price_step)
-    ax2.set_xlim(start_ts, end_ts)
-    ax2.set_ylim(min_p - price_step, max_p + price_step)
+    for ax in [ax1, ax2, ax3]:
+        ax.set_xlim(start_ts, end_ts)
+        ax.set_ylim(min_p - price_step, max_p + price_step)
+        ax.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
 
     if time_step < 600:
         time_interval = timedelta(minutes=10)
@@ -232,8 +270,8 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
             time_ticks.append(ts)
         current_time += time_interval
     
-    ax2.set_xticks(time_ticks)
-    ax2.set_xticklabels([datetime.fromtimestamp(t).strftime('%H:%M') for t in time_ticks], rotation=45)
+    ax3.set_xticks(time_ticks)
+    ax3.set_xticklabels([datetime.fromtimestamp(t).strftime('%H:%M') for t in time_ticks], rotation=45)
     
     start_price_tick = np.floor(min_p / 100) * 100
     end_price_tick = np.ceil(max_p / 100) * 100
@@ -241,16 +279,18 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     
     ax1.set_yticks(price_ticks)
     ax2.set_yticks(price_ticks)
+    ax3.set_yticks(price_ticks)
 
-    ax1.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
     ax1.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
     ax1.set_ylabel("Price (BUY)")
     ax1.set_title(f"Aggregated Profits Heatmap (Step: {time_step}s, {price_step} pts)")
 
-    ax2.grid(True, which='both', axis='both', linestyle='--', linewidth=0.8, alpha=0.7, color='gray')
     ax2.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
-    ax2.set_xlabel("Time")
     ax2.set_ylabel("Price (SELL)")
+
+    ax3.tick_params(axis='y', which='both', labelright=True, direction='inout', length=6)
+    ax3.set_xlabel("Time")
+    ax3.set_ylabel("Price (NET: BUY-SELL)")
 
     plt.tight_layout()
     target_path = output_path if output_path else OUTPUT_IMAGE
