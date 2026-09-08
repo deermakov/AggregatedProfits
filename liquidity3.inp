@@ -36,9 +36,8 @@ endloop
 
 smpl ok(coeffSells) == 1 --restrict 
 
-gnuplot PRICE --time-series --with-lines --output=display
+#gnuplot PRICE --time-series --with-lines --output=display
 
 #gnuplot coeffSells coeffBuys --time-series --with-lines --single-yaxis --output=display
-list list1 = coeffSells coeffBuys
-gnuplot list1 --time-series --output=display {set ytics 0.1; set yrange[0:1]; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green";}
-
+list list1 = coeffSells coeffBuys PRICE
+gnuplot list1 --time-series --output=display {set ytics 0.1; set yrange[0:1]; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
