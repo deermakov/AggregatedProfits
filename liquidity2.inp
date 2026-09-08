@@ -1,0 +1,76 @@
+clear 
+open C:\_Work\ML\AggregatedProfits\2026.09.08.txt
+setobs 1 1 --special-time-series
+
+series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
+series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
+
+series cumflow = cum(d_flow)
+series cumflowSign = cum(d_flow_sign)
+
+#smpl obs > 160000 && obs < 161000 && d_flow_sign == -1 --restrict
+#setobs 1 1
+
+scalar STEP = 30
+scalar REGRESS_WINDOW = 60
+
+series intervalMarker
+series meanPrice
+series hiPrice
+series loPrice
+series openPrice
+series closePrice
+series priceDiff
+series numSells
+series numBuys
+series volSells
+series volBuys
+series coeffSells
+series coeffBuys
+
+scalar intervalStartTime = strptime("02/07/19 " ~ TRADETIME[1], "%m/%d/%y %H:%M:%S")
+scalar intervalStart = $t1
+loop for i = 1..$t2 --quiet
+    scalar currTime = strptime("02/07/19 " ~ TRADETIME[i], "%m/%d/%y %H:%M:%S")
+
+    if (currTime - intervalStartTime) >= STEP # начался следующий интервал
+        priceDiff[i-1] = PRICE[i-1] - PRICE[intervalStart]
+
+        smpl intervalStart i-1 --quiet
+        meanPrice[$t2] = mean(PRICE)
+        hiPrice[$t2] = max(PRICE)
+        loPrice[$t2] = min(PRICE)
+        openPrice[$t2] = PRICE[$t1]
+        closePrice[$t2] = PRICE[$t2]
+        numSells[$t2] = abs( sum(d_flow_sign < 0 ? d_flow_sign : 0) )
+        numBuys[$t2] = sum(d_flow_sign > 0 ? d_flow_sign : 0)
+        volSells[$t2] = abs( sum(d_flow_sign < 0 ? d_flow : 0) )
+        volBuys[$t2] = abs( sum(d_flow_sign > 0 ? d_flow : 0) )
+        intervalMarker[$t2] = 0
+        smpl full
+
+        intervalStart = i
+        intervalStartTime = currTime
+    endif
+endloop
+smpl ok(closePrice) == 1 --restrict --permanent
+setobs 1 1 --special-time-series
+
+# --- Rolling Regression ---
+loop for i = REGRESS_WINDOW..$t2 --quiet
+    smpl (obs >= i - REGRESS_WINDOW + 1) && (obs <= i) --restrict
+    #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
+    ols priceDiff numSells numBuys
+    coeffSells[i] = $coeff[1]
+    coeffBuys[i] = $coeff[2]
+    smpl full
+    setobs 1 1 --special-time-series
+endloop
+
+#plot closePrice(axis right) coeffSells(axis left) coeffBuys(axis left)
+series s2 = -coeffSells
+gnuplot closePrice --time-series --with-lines --output=display
+
+#gnuplot s2 coeffBuys --time-series --with-lines --single-yaxis --output=display
+list list1 = s2 coeffBuys
+gnuplot list1 --time-series --output=display {set ytics 0.1; set yrange[0:0.5]; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green";}
