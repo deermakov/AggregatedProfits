@@ -40,4 +40,4 @@ smpl ok(coeffSells) == 1 --restrict
 
 #gnuplot coeffSells coeffBuys --time-series --with-lines --single-yaxis --output=display
 list list1 = coeffSells coeffBuys PRICE
-gnuplot list1 --time-series --output=display {set terminal pngcairo size 1800,600; set ytics 0.001; set yrange[0:0.005]; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
+gnuplot list1 --time-series --output=display {set terminal pngcairo size 1800,600; set ytics 0.001; set yrange[0:0.005]; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
