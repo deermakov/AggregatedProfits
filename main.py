@@ -17,14 +17,19 @@ def get_paths():
     time_step = float(os.environ.get('TIME_STEP_SEC', 1))
     price_step = float(os.environ.get('PRICE_STEP', 1))
     percentile_grid = int(os.environ.get('PERCENTILE_GRID_SIZE', 10))
+    price_grid_step = float(os.environ.get('PRICE_GRID_STEP', 0.1))
     start_time_str = os.environ.get('START_TIME', '') # Format: 'HH:MM:SS'
-    return input_file, output_image, output_text, output_image_aggregated, time_step, price_step, percentile_grid, start_time_str
+    return input_file, output_image, output_text, output_image_aggregated, time_step, price_step, percentile_grid, start_time_str, price_grid_step
 
-INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, OUTPUT_IMAGE_AGGREGATED, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, START_TIME_STR = get_paths()
+INPUT_FILE, OUTPUT_IMAGE, OUTPUT_TEXT, OUTPUT_IMAGE_AGGREGATED, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, START_TIME_STR, PRICE_GRID_STEP = get_paths()
 
 def process_data(input_path, time_step, price_step, percentile_grid, start_time=None):
     # Load data
     df = pd.read_csv(input_path, sep='\t')
+
+    # Ensure PRICE is numeric (handles cases where decimal separator might be a comma)
+    if df['PRICE'].dtype == 'object':
+        df['PRICE'] = df['PRICE'].str.replace(',', '.').astype(float)
     
     # Combine time and msec to get proper datetime.
     # Since there is no date in the file, we'll use a placeholder date (e.g., 2026-06-23)
@@ -206,7 +211,7 @@ def save_cells_to_txt(pivot_df, start_time, output_path):
             if row['SELL'] > 0:
                 f.write(f"SELL\t{start_dt}\t{p:.2f}\t{row['SELL']:.6f}\n")
 
-def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_grid, output_path=None):
+def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_grid, price_grid_step, output_path=None):
     if pivot_df.empty:
         print("No data to plot.")
         return
@@ -273,9 +278,9 @@ def plot_data(pivot_df, start_time, end_time, time_step, price_step, percentile_
     ax3.set_xticks(time_ticks)
     ax3.set_xticklabels([datetime.fromtimestamp(t).strftime('%H:%M') for t in time_ticks], rotation=45)
     
-    start_price_tick = np.floor(min_p / 100) * 100
-    end_price_tick = np.ceil(max_p / 100) * 100
-    price_ticks = np.arange(start_price_tick, end_price_tick + 100, 100)
+    start_price_tick = np.floor(min_p / price_grid_step) * price_grid_step
+    end_price_tick = np.ceil(max_p / price_grid_step) * price_grid_step
+    price_ticks = np.arange(start_price_tick, end_price_tick + price_grid_step, price_grid_step)
     
     ax1.set_yticks(price_ticks)
     ax2.set_yticks(price_ticks)
@@ -318,13 +323,13 @@ if __name__ == "__main__":
             if df_pivot.empty or start_t is None:
                 print("No data available after filtering.")
             else:
-                plot_data(df_pivot, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE)
+                plot_data(df_pivot, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, PRICE_GRID_STEP)
                 save_cells_to_txt(df_pivot, start_t, OUTPUT_TEXT)
                 print(f"Cells data saved to {OUTPUT_TEXT}")
 
                 print("Running aggregated version...")
                 df_agg = aggregate_cells(df_pivot, TIME_STEP_SEC)
-                plot_data(df_agg, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, output_path=OUTPUT_IMAGE_AGGREGATED)
+                plot_data(df_agg, start_t, end_t, TIME_STEP_SEC, PRICE_STEP, PERCENTILE_GRID_SIZE, PRICE_GRID_STEP, output_path=OUTPUT_IMAGE_AGGREGATED)
                 print(f"Aggregated graph saved to {OUTPUT_IMAGE_AGGREGATED}")
 
         except Exception as e:

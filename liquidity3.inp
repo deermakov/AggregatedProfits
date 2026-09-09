@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.08.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.09.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -13,8 +13,8 @@ series cumflowSign = cum(d_flow_sign)
 #smpl obs > 160000 && obs < 161000 && d_flow_sign == -1 --restrict
 #setobs 1 1
 
-scalar STEP = 100
-scalar REGRESS_WINDOW = 3000
+scalar STEP = 10
+scalar REGRESS_WINDOW = 500
 
 series sells = d_flow_sign < 0 ? d_flow_sign : 0
 series buys = d_flow_sign > 0 ? d_flow_sign : 0
@@ -40,4 +40,4 @@ smpl ok(coeffSells) == 1 --restrict
 
 #gnuplot coeffSells coeffBuys --time-series --with-lines --single-yaxis --output=display
 list list1 = coeffSells coeffBuys PRICE
-gnuplot list1 --time-series --output=display {set ytics 0.1; set yrange[0:1]; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
+gnuplot list1 --time-series --output=display {set ytics 0.001; set yrange[0:0.005]; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
