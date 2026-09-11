@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.10.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.11.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -23,6 +23,53 @@ series volBuys = d_flow_sign > 0 ? d_flow : 0
 series coeffSells
 series coeffBuys
 
+# ========== Средние значения flow, structural breaks of
+smpl --full
+series avgFlow
+genr index
+
+foreign language=R --send-data
+	library("cpm")
+	res <- processStream(gretldata[,"d_flow_sign"], "Mann-Whitney", ARL0=5000, startup=1000, lambda=NA)
+	changePoints <- as.matrix(res$changePoints)
+	gretl.export(changePoints)
+	on.exit(closeAllConnections())
+end foreign
+catch matrix changePoints = mread("changePoints.mat", 1)
+
+if !$error
+loop i=1..rows(changePoints)+1 --quiet
+    if (i == 1)
+        smpl obs<=changePoints[i,1] --restrict --quiet
+    else
+        if (i>rows(changePoints))
+            smpl obs>changePoints[i-1,1] --restrict --quiet
+        else
+            smpl obs>changePoints[i-1,1] && obs <=changePoints[i,1] --restrict --quiet
+        endif   
+    endif
+
+    setobs 1 1 --special-time-series
+    #avgFlow = mean(d_flow_sign)
+    
+    series idx = index - index[$t1]
+    ols cumflowSign 0 idx --quiet
+    
+    print $nobs
+    if (i <= rows(changePoints)) || ($nobs >= 1000)
+        avgFlow = $coeff[1] + $coeff[2] * idx
+    endif    
+    
+    smpl full --quiet
+    setobs 1 1 --special-time-series
+endloop
+else
+    avgFlow = mean(d_flow_sign)
+endif
+
+# ==========
+
+
 # --- Rolling Regression ---
 loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
     smpl (obs >= i - REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
@@ -40,7 +87,7 @@ smpl ok(coeffSells) == 1 --restrict
 
 #gnuplot coeffSells coeffBuys --time-series --with-lines --single-yaxis --output=display
 list list1 = coeffSells coeffBuys PRICE
-gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
+gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 100; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
 
-list list2 = coeffSells coeffBuys cumflowSign
-gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue";}
+list list2 = coeffSells coeffBuys cumflowSign avgFlow
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w lines title "avg flow" lc rgb "blue" lw 2;}
