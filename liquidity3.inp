@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.15.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.16.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -30,7 +30,7 @@ genr index
 
 foreign language=R --send-data
 	library("cpm")
-	res <- processStream(gretldata[,"d_flow_sign"], "Mann-Whitney", ARL0=5000, startup=1000, lambda=NA)
+	res <- processStream(gretldata[,"d_flow_sign"], "Mann-Whitney", ARL0=50000, startup=1000, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
@@ -82,6 +82,7 @@ loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
 endloop
 
 smpl ok(coeffSells) == 1 --restrict 
+smpl obs > ($t2 - 500) --restrict
 
 #gnuplot PRICE --time-series --with-lines --output=display
 
@@ -91,3 +92,5 @@ gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,60
 
 list list2 = coeffSells coeffBuys cumflowSign avgFlow
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3;}
+
+smpl full
