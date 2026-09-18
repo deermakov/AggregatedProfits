@@ -1,0 +1,94 @@
+clear 
+open C:\_Work\ML\AggregatedProfits\2026.09.18.txt
+setobs 1 1 --special-time-series
+
+series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
+series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
+
+diff PRICE
+
+series cumflow = cum(d_flow)
+series cumflowSign = cum(d_flow_sign)
+
+#smpl obs > 160000 && obs < 161000 && d_flow_sign == -1 --restrict
+#setobs 1 1
+
+scalar STEP = 10
+scalar REGRESS_WINDOW = 500
+
+series sells = d_flow_sign < 0 ? d_flow_sign : 0
+series buys = d_flow_sign > 0 ? d_flow_sign : 0
+series volSells = d_flow_sign < 0 ? d_flow : 0
+series volBuys = d_flow_sign > 0 ? d_flow : 0
+
+# ========== Средние значения flow, structural breaks of
+smpl --full
+series avgFlow
+genr index
+
+foreign language=R --send-data
+	# Установка и загрузка библиотеки
+	# install.packages("depmixS4")
+	library(depmixS4)
+
+	# 1. Подготовка данных
+	# Допустим, ваш ряд: y <- c(1, 1, -1, -1, 1, -1, ...)
+	# Преобразуем в индексы категорий (1 и 2), так как depmixS4 работает с ними
+	y_encoded <- as.factor(ifelse(gretldata[,"d_flow_sign"] == -1, 1, 2))
+	data_df <- data.frame(val = y_encoded)
+
+	data_df$lag1 <- c(NA, head(data_df$val, -1))
+	data_df$lag2 <- c(NA, NA, head(data_df$val, -2))
+	data_df <- na.omit(data_df)
+
+	# 2. Определение модели
+	# Предположим, мы ищем 2 скрытых режима (K=2)
+	# Используем категориальное распределение (multinomial)
+	n_states <- 3
+	
+	model <- depmix(
+		val ~ lag1 + lag2,
+		family = multinomial(),
+		nstates = n_states,
+		data = data_df,
+		instart = c(0.33, 0.34, 0.33),
+		trstart = matrix(c(0.998, 0.001, 0.001,  # из S1 в S1, S2, S3
+                        0.001, 0.998, 0.001,
+						0.001, 0.001, 0.998), # из S3 в S1, S2, S3
+                      nrow = 3, byrow = TRUE)
+	)
+
+	# 3. Обучение модели (EM-алгоритм)
+	fit_model <- fit(model)
+
+	# Вывод параметров (вероятности эмиссий для каждого состояния)
+	# summary(fit_model)
+
+	# 4. Получение результатов: определение скрытых состояний для каждой точки времени
+	post_probs <- posterior(fit_model)
+
+	# post_probs$state покажет, в каком режиме находился ряд в каждый момент времени
+	# print(post_probs)
+
+	modesProbabilities <- as.matrix(post_probs)
+	gretl.export(modesProbabilities)
+	on.exit(closeAllConnections())
+end foreign
+catch matrix modesProbabilities = mread("modesProbabilities.mat", 1)
+
+series regime1
+series regime2
+series regime3
+
+smpl obs >= 3 --restrict # отрезаем первое наблюдение, т.к. оно было исключено в скрипте R (т.к. для него нет лага-1) и поэтому оно отсутствует в результирующей матрице modesProbabilities
+
+regime1 = modesProbabilities[,2]
+regime2 = modesProbabilities[,3]
+regime3 = modesProbabilities[,4]
+
+smpl obs > ($t2 - 1000) --restrict
+
+list list2 = regime1 regime2 regime3 cumflowSign
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.1; set yrange[0:1]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "regime1" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "regime2" lc rgb "green", '-' using 1:($2) axes x1y1 w lines title "regime3" lc rgb "black", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue";}
+
+smpl full
