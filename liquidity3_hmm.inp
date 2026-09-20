@@ -80,7 +80,7 @@ series regime1
 series regime2
 series regime3
 
-smpl obs >= 3 --restrict # отрезаем первое наблюдение, т.к. оно было исключено в скрипте R (т.к. для него нет лага-1) и поэтому оно отсутствует в результирующей матрице modesProbabilities
+smpl obs > ($t2-rows(modesProbabilities)) --restrict # отрезаем наблюдения, отрезанные в скрипте R из-за лагов
 
 regime1 = modesProbabilities[,2]
 regime2 = modesProbabilities[,3]
