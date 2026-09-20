@@ -30,6 +30,7 @@ foreign language=R --send-data
 	# Установка и загрузка библиотеки
 	# install.packages("depmixS4")
 	library(depmixS4)
+	library(TTR)
 
 	# 1. Подготовка данных
 	# Допустим, ваш ряд: y <- c(1, 1, -1, -1, 1, -1, ...)
@@ -37,8 +38,21 @@ foreign language=R --send-data
 	y_encoded <- as.factor(ifelse(gretldata[,"d_flow_sign"] == -1, 1, 2))
 	data_df <- data.frame(val = y_encoded)
 
+	# 1. Короткая память (последние лагм)
 	data_df$lag1 <- c(NA, head(data_df$val, -1))
 	data_df$lag2 <- c(NA, NA, head(data_df$val, -2))
+
+	# 2. Среднесрочная инерция (SMA)
+	data_df$sma_medium <- SMA(data_df$val, n = 10)
+
+	# 3. Долговременная память (EWMA - очень эффективна!)
+	# Параметр n здесь определяет "сглаживание"
+	data_df$ewma_long <- EMA(data_df$val, n = 50)
+
+	# 4. Разница (импульс)
+	data_df$momentum <- data_df$sma_medium - data_df$ewma_long
+
+	# Удаляем NA, которые возникли из-за лагов
 	data_df <- na.omit(data_df)
 
 	# 2. Определение модели
