@@ -71,7 +71,7 @@ foreign language=R --send-data
 		family = multinomial(),
 		nstates = n_states,
 		data = data_df,
-		instart = c(0.33, 0.34, 0.33),
+		instart = c(0.333, 0.334, 0.333),
 		trstart = matrix(c(0.998, 0.001, 0.001,  # из S1 в S1, S2, S3
                         0.001, 0.998, 0.001,
 						0.001, 0.001, 0.998), # из S3 в S1, S2, S3
