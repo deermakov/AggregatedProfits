@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.18.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.21.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -41,6 +41,12 @@ foreign language=R --send-data
 	# 1. Короткая память (последние лагм)
 	data_df$lag1 <- c(NA, head(data_df$val, -1))
 	data_df$lag2 <- c(NA, NA, head(data_df$val, -2))
+	n_lag <- 50
+	data_df$lag50 <- c(rep(NA, n_lag), head(data_df$val, -n_lag))	
+	n_lag <- 100
+	data_df$lag100 <- c(rep(NA, n_lag), head(data_df$val, -n_lag))
+	n_lag <- 200
+	data_df$lag200 <- c(rep(NA, n_lag), head(data_df$val, -n_lag))
 
 	# 2. Среднесрочная инерция (SMA)
 	data_df$sma_medium <- SMA(data_df$val, n = 10)
@@ -61,7 +67,7 @@ foreign language=R --send-data
 	n_states <- 3
 	
 	model <- depmix(
-		val ~ lag1 + lag2,
+		val ~ lag1 + lag2 + lag50 + lag100 + lag200,
 		family = multinomial(),
 		nstates = n_states,
 		data = data_df,
@@ -100,7 +106,7 @@ regime1 = modesProbabilities[,2]
 regime2 = modesProbabilities[,3]
 regime3 = modesProbabilities[,4]
 
-smpl obs > ($t2 - 1000) --restrict
+smpl obs > ($t2 - 2000) --restrict
 
 list list2 = regime1 regime2 regime3 cumflowSign
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.1; set yrange[0:1]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "regime1" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "regime2" lc rgb "green", '-' using 1:($2) axes x1y1 w lines title "regime3" lc rgb "black", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue";}

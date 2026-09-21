@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.16.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.21.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -82,15 +82,15 @@ loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
 endloop
 
 smpl ok(coeffSells) == 1 --restrict 
-smpl obs > ($t2 - 500) --restrict
+smpl obs > ($t2 - 2000/STEP) --restrict
 
 #gnuplot PRICE --time-series --with-lines --output=display
 
 #gnuplot coeffSells coeffBuys --time-series --with-lines --single-yaxis --output=display
 list list1 = coeffSells coeffBuys PRICE
-gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 100; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
+gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 10; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
 
 list list2 = coeffSells coeffBuys cumflowSign avgFlow
-gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3;}
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.001; set yrange[0:0.005]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3;}
 
 smpl full
