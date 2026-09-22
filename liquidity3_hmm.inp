@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.21.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.22.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -32,13 +32,16 @@ foreign language=R --send-data
 	library(depmixS4)
 	library(TTR)
 
-	# 1. Подготовка данных
+	# Путь к файлу параметров (используем прямые слэши для R)
+	param_file <- "C:/_Work/ML/AggregatedProfits/USDRUBF_hmm_params.rds"
+
+	# Подготовка данных
 	# Допустим, ваш ряд: y <- c(1, 1, -1, -1, 1, -1, ...)
 	# Преобразуем в индексы категорий (1 и 2), так как depmixS4 работает с ними
 	y_encoded <- as.factor(ifelse(gretldata[,"d_flow_sign"] == -1, 1, 2))
 	data_df <- data.frame(val = y_encoded)
 
-	# 1. Короткая память (последние лагм)
+	# Короткая память (последние лагм)
 	data_df$lag1 <- c(NA, head(data_df$val, -1))
 	data_df$lag2 <- c(NA, NA, head(data_df$val, -2))
 	n_lag <- 50
@@ -48,41 +51,58 @@ foreign language=R --send-data
 	n_lag <- 200
 	data_df$lag200 <- c(rep(NA, n_lag), head(data_df$val, -n_lag))
 
-	# 2. Среднесрочная инерция (SMA)
+	# Среднесрочная инерция (SMA)
 	data_df$sma_medium <- SMA(data_df$val, n = 10)
-
-	# 3. Долговременная память (EWMA - очень эффективна!)
+	# Долговременная память (EWMA - очень эффективна!)
 	# Параметр n здесь определяет "сглаживание"
 	data_df$ewma_long <- EMA(data_df$val, n = 50)
-
-	# 4. Разница (импульс)
+	# Разница (импульс)
 	data_df$momentum <- data_df$sma_medium - data_df$ewma_long
 
 	# Удаляем NA, которые возникли из-за лагов
 	data_df <- na.omit(data_df)
 
-	# 2. Определение модели
-	# Предположим, мы ищем 2 скрытых режима (K=2)
-	# Используем категориальное распределение (multinomial)
+	# Дообучать ли модель (если TRUE - обучаем заново и пересохраняем параметры)
+	do_update_model <- FALSE
+
+	# Определение количества состояний
 	n_states <- 3
 	
+	# Создаем структуру модели
 	model <- depmix(
 		val ~ lag1 + lag2 + lag50 + lag100 + lag200,
 		family = multinomial(),
 		nstates = n_states,
 		data = data_df,
 		instart = c(0.333, 0.334, 0.333),
-		trstart = matrix(c(0.998, 0.001, 0.001,  # из S1 в S1, S2, S3
-                        0.001, 0.998, 0.001,
-						0.001, 0.001, 0.998), # из S3 в S1, S2, S3
-                      nrow = 3, byrow = TRUE)
+		trstart = matrix(c(0.998, 0.001, 0.001,
+							0.001, 0.998, 0.001,
+							0.001, 0.001, 0.998),
+							nrow = 3, byrow = TRUE)
 	)
 
-	# 3. Обучение модели (EM-алгоритм)
-	fit_model <- fit(model)
+	# Если файл с параметрами существует, загружаем только параметры в структуру модели
+	if (file.exists(param_file)) {
+		pars <- readRDS(param_file)
+		model <- setpars(model, pars)
+	}
 
-	# Вывод параметров (вероятности эмиссий для каждого состояния)
-	# summary(fit_model)
+	# Обучение модели (EM-алгоритм). 
+    # Если параметры были загружены выше, обучение начнется с них.
+	if (do_update_model) { # обновляеи все коэффициенты в модели
+		fit_model <- fit(model)
+	} else { # НЕ обновляеи все коэффициенты в модели
+		all_pars <- getpars(model)
+		num_params <- length(all_pars)
+		fix_vector <- rep(FALSE, num_params)
+		fit_model <- fit(model, fixed = fix_vector)
+	}
+
+	# Сохраняем только параметры обученной модели
+	if (do_update_model) {
+		saveRDS(getpars(fit_model), param_file)
+	}
+
 
 	# 4. Получение результатов: определение скрытых состояний для каждой точки времени
 	post_probs <- posterior(fit_model)
