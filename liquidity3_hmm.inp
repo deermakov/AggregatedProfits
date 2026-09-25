@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.22.txt
+open C:\_Work\ML\AggregatedProfits\2026.09.25.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -39,7 +39,7 @@ foreign language=R --send-data
 	# Допустим, ваш ряд: y <- c(1, 1, -1, -1, 1, -1, ...)
 	# Преобразуем в индексы категорий (1 и 2), так как depmixS4 работает с ними
 	y_encoded <- as.factor(ifelse(gretldata[,"d_flow_sign"] == -1, 1, 2))
-	data_df <- data.frame(val = y_encoded)
+	data_df <- data.frame(val = y_encoded, d_price = gretldata[,"d_PRICE"])
 
 	# Короткая память (последние лагм)
 	data_df$lag1 <- c(NA, head(data_df$val, -1))
@@ -50,6 +50,9 @@ foreign language=R --send-data
 	data_df$lag100 <- c(rep(NA, n_lag), head(data_df$val, -n_lag))
 	n_lag <- 200
 	data_df$lag200 <- c(rep(NA, n_lag), head(data_df$val, -n_lag))
+
+	data_df$d_price_lag1 <- c(NA, head(data_df$d_price, -1))
+	data_df$d_price_lag2 <- c(NA, NA, head(data_df$d_price, -2))
 
 	# Среднесрочная инерция (SMA)
 	data_df$sma_medium <- SMA(data_df$val, n = 10)
