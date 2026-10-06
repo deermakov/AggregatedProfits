@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.09.25.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.06.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -132,6 +132,6 @@ regime3 = modesProbabilities[,4]
 smpl obs > ($t2 - 2000) --restrict
 
 list list2 = regime1 regime2 regime3 cumflowSign
-gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set ytics 0.1; set yrange[0:1]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "regime1" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "regime2" lc rgb "green", '-' using 1:($2) axes x1y1 w lines title "regime3" lc rgb "black", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue";}
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0:1]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "regime1" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "regime2" lc rgb "green", '-' using 1:($2) axes x1y1 w lines title "regime3" lc rgb "black", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue";}
 
 smpl full
