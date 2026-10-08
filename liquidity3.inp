@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.06.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.08.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -30,7 +30,7 @@ genr index
 
 foreign language=R --send-data
 	library("cpm")
-	res <- processStream(gretldata[,"d_flow_sign"], "Mann-Whitney", ARL0=50000, startup=1000, lambda=NA)
+	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=50000, startup=1000, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
