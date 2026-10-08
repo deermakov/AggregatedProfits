@@ -26,6 +26,8 @@ series coeffBuys
 # ========== Средние значения flow, structural breaks of
 smpl --full
 series avgFlow
+series avgFlowUpperEst
+series avgFlowLowerEst
 genr index
 
 foreign language=R --send-data
@@ -56,8 +58,26 @@ loop i=1..rows(changePoints)+1 --quiet
     ols cumflowSign 0 idx --quiet
     
     print $nobs
-    if (i <= rows(changePoints)) || ($nobs >= 1000)
+    
+    if (i <= rows(changePoints))
         avgFlow = $coeff[1] + $coeff[2] * idx
+    else
+        # Интервал для наклона (коэффициента idx)
+        scalar studentCritValue = 2        
+        
+        # неправильно - ошибка mean
+        scalar mn = mean(d_flow_sign)
+        scalar meanStdDev = sd(d_flow_sign)
+        scalar meanStdErr = meanStdDev / sqrt($nobs)
+        scalar slope_upper = mn + studentCritValue * meanStdErr
+        scalar slope_lower = mn - studentCritValue * meanStdErr
+        
+        # правильно - ошибки из OLS
+        #scalar slope_upper = $coeff[2] + studentCritValue * $stderr[2]
+        #scalar slope_lower = $coeff[2] - studentCritValue * $stderr[2]
+        
+        avgFlowUpperEst = $coeff[1] + slope_upper * idx
+        avgFlowLowerEst = $coeff[1] + slope_lower * idx
     endif    
     
     smpl full --quiet
@@ -90,7 +110,7 @@ smpl obs > ($t2 - 2000/STEP) --restrict
 list list1 = coeffSells coeffBuys PRICE
 gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 10; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
 
-list list2 = coeffSells coeffBuys cumflowSign avgFlow
-gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3;}
+list list2 = coeffSells coeffBuys cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
 smpl full
