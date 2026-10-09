@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.08.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.09.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -65,12 +65,12 @@ loop i=1..rows(changePoints)+1 --quiet
         # Интервал для наклона (коэффициента idx)
         scalar studentCritValue = 2        
         
-        # неправильно - ошибка mean
-        scalar mn = mean(d_flow_sign)
+        # неправильно - ошибка mean'а
+        #scalar mn = mean(d_flow_sign)
         scalar meanStdDev = sd(d_flow_sign)
         scalar meanStdErr = meanStdDev / sqrt($nobs)
-        scalar slope_upper = mn + studentCritValue * meanStdErr
-        scalar slope_lower = mn - studentCritValue * meanStdErr
+        scalar slope_upper = $coeff[2] + studentCritValue * meanStdErr
+        scalar slope_lower = $coeff[2] - studentCritValue * meanStdErr
         
         # правильно - ошибки из OLS
         #scalar slope_upper = $coeff[2] + studentCritValue * $stderr[2]
