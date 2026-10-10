@@ -62,6 +62,8 @@ loop i=1..rows(changePoints)+1 --quiet
     if (i <= rows(changePoints))
         avgFlow = $coeff[1] + $coeff[2] * idx
     else
+        avgFlow = $coeff[1] + $coeff[2] * idx
+        
         # Интервал для наклона (коэффициента idx)
         scalar studentCritValue = 2        
         
