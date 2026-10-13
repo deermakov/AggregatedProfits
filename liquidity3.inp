@@ -1,25 +1,53 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.09.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.13.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
 series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
 
-diff PRICE
-
 series cumflow = cum(d_flow)
 series cumflowSign = cum(d_flow_sign)
 
-#smpl obs > 160000 && obs < 161000 && d_flow_sign == -1 --restrict
-#setobs 1 1
+scalar AGGR_WINDOW = 10
+scalar STEP = 1
+scalar REGRESS_WINDOW = 50
 
-scalar STEP = 10
-scalar REGRESS_WINDOW = 500
+series sells
+series buys
 
-series sells = d_flow_sign < 0 ? d_flow_sign : 0
-series buys = d_flow_sign > 0 ? d_flow_sign : 0
-series volSells = d_flow_sign < 0 ? d_flow : 0
-series volBuys = d_flow_sign > 0 ? d_flow : 0
+# --- Aggregation of d_flow_sign ---
+series d_flow_sign_sum_series = 0/0
+scalar d_flow_sign_sum = 0
+scalar cnt = 0
+scalar buy_sum = 0
+scalar sell_sum = 0
+loop i=1..$nobs --quiet
+    if (cnt == AGGR_WINDOW)
+        d_flow_sign_sum_series[i-1] = d_flow_sign_sum
+        sells[i-1] = sell_sum
+        buys[i-1] = buy_sum
+
+        d_flow_sign_sum = d_flow_sign[i]        
+        cnt = 1
+        buy_sum = d_flow_sign[i] == 1 ? 1 : 0
+        sell_sum = d_flow_sign[i] == -1 ? -1 : 0
+    else
+        cnt++
+        
+        d_flow_sign_sum += d_flow_sign[i]
+        buy_sum += (d_flow_sign[i] == 1 ? 1 : 0)
+        sell_sum += (d_flow_sign[i] == -1 ? -1 : 0)
+    endif
+endloop
+if $nobs > 0
+    d_flow_sign_sum_series[$nobs] = d_flow_sign_sum
+endif
+# ------------------------------------------
+smpl ok(d_flow_sign_sum_series) == 1 --restrict --permanent
+d_flow_sign = d_flow_sign_sum_series
+
+diff PRICE
+
 series coeffSells
 series coeffBuys
 
@@ -32,7 +60,7 @@ genr index
 
 foreign language=R --send-data
 	library("cpm")
-	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=50000, startup=1000, lambda=NA)
+	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=2000, startup=10, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
@@ -68,15 +96,14 @@ loop i=1..rows(changePoints)+1 --quiet
         scalar studentCritValue = 2        
         
         # неправильно - ошибка mean'а
-        #scalar mn = mean(d_flow_sign)
-        scalar meanStdDev = sd(d_flow_sign)
-        scalar meanStdErr = meanStdDev / sqrt($nobs)
-        scalar slope_upper = $coeff[2] + studentCritValue * meanStdErr
-        scalar slope_lower = $coeff[2] - studentCritValue * meanStdErr
+        #scalar meanStdDev = sd(d_flow_sign)
+        #scalar meanStdErr = meanStdDev / sqrt($nobs)
+        #scalar slope_upper = $coeff[2] + studentCritValue * meanStdErr
+        #scalar slope_lower = $coeff[2] - studentCritValue * meanStdErr
         
         # правильно - ошибки из OLS
-        #scalar slope_upper = $coeff[2] + studentCritValue * $stderr[2]
-        #scalar slope_lower = $coeff[2] - studentCritValue * $stderr[2]
+        scalar slope_upper = $coeff[2] + studentCritValue * $stderr[2]
+        scalar slope_lower = $coeff[2] - studentCritValue * $stderr[2]
         
         avgFlowUpperEst = $coeff[1] + slope_upper * idx
         avgFlowLowerEst = $coeff[1] + slope_lower * idx
@@ -89,10 +116,50 @@ else
     avgFlow = mean(d_flow_sign)
 endif
 
+# --- Permutation Entropy Calculation ---
+series perm_entropy_series
+foreign language=R --send-data
+	# Base R implementation to avoid dependency issues and improve speed
+	data_vec <- gretldata[,"d_flow_sign"]
+	m <- 3
+	W <- 30 # рекомендуется >= 5 * m!
+	n <- length(data_vec)
+	pe_results <- rep(0, n)
+	
+	if (n >= W) {
+		# Pre-calculate permutations for all segments of length m
+		segments <- embed(data_vec, m)
+		perms <- apply(segments, 1, function(s) paste(order(s), collapse = ""))
+		
+		# Normalization factor: log2(m!)
+		norm_factor <- log2(factorial(m))
+		
+		# Calculate rolling entropy
+		for (i in W:n) {
+			# The window ends at index i. The segments contained are those 
+			# starting from i-W+1 up to i-m+1.
+			win_perms <- perms[(i-W+1):(i-m+1)]
+			counts <- table(win_perms)
+			probs <- counts / sum(counts)
+			pe_results[i] <- (-sum(probs * log2(probs))) / norm_factor
+		}
+	}
+	entropy <- as.matrix(pe_results)
+	gretl.export(entropy)
+	on.exit(closeAllConnections())
+end foreign
+
+catch matrix pe_vals = mread("entropy.mat", 1)
+if !$error
+    perm_entropy_series = pe_vals
+endif
+# --------------------------------------
+
 # ==========
 
 
 # --- Rolling Regression ---
+
 loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
     smpl (obs >= i - REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
     #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
@@ -104,7 +171,7 @@ loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
 endloop
 
 smpl ok(coeffSells) == 1 --restrict 
-smpl obs > ($t2 - 2000/STEP) --restrict
+smpl obs > ($t2 - 200/STEP) --restrict
 
 #gnuplot PRICE --time-series --with-lines --output=display
 
@@ -114,5 +181,10 @@ gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,60
 
 list list2 = coeffSells coeffBuys cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+
+# Plot Permutation Entropy
+#smpl ok(perm_entropy_series) == 1 --restrict
+list list3 = cumflowSign perm_entropy_series
+gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,400; set tics font ", 12"; set ytics 0.1; set yrange[0.8:1]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple";}
 
 smpl full
