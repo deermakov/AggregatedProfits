@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.14.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.15.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -58,6 +58,9 @@ series avgFlowUpperEst
 series avgFlowLowerEst
 genr index
 
+series trend_length
+series trend_size
+
 foreign language=R --send-data
 	library("cpm")
 	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=2000, startup=10, lambda=NA)
@@ -89,6 +92,10 @@ loop i=1..rows(changePoints)+1 --quiet
     
     if (i <= rows(changePoints))
         avgFlow = $coeff[1] + $coeff[2] * idx
+        
+        trend_length[$t2] = $nobs
+        trend_size[$t2] = cumflowSign[$t2] - cumflowSign[$t1]
+
     else
         avgFlow = $coeff[1] + $coeff[2] * idx
         
