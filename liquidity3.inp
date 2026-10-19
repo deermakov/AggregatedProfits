@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.15.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.19.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -196,6 +196,6 @@ gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,60
 # Plot Permutation Entropy
 #smpl ok(perm_entropy_series) == 1 --restrict
 list list3 = cumflowSign perm_entropy_series
-gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,400; set tics font ", 12"; set ytics 0.1; set yrange[0.5:1]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple";}
+gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,400; set tics font ", 12"; set ytics 0.1; set yrange[0.7:1]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple";}
 
 smpl full
