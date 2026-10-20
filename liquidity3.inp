@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.19.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.20.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -132,10 +132,22 @@ series perm_entropy_series
 foreign language=R --send-data
 	# Base R implementation to avoid dependency issues and improve speed
 	data_vec <- gretldata[,"d_flow_sign"]
-	m <- 3
-	W <- 50 # рекомендуется >= 5 * m!
+	m <- 4
+	W <- 150 # рекомендуется >= 5 * m!
 	n <- length(data_vec)
 	pe_results <- rep(0, n)
+
+	# --- Exponential weighting of pattern counters ---
+	# The counter of each pattern inside the window is multiplied by
+	# exp(-PE_LAMBDA * age), where age is the number of observations
+	# between the last point of the pattern and the end of the window
+	# (the newest pattern has age 0, the oldest has age W-m).
+	# This makes the entropy react faster to recent changes in the
+	# pattern structure. Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
+	# PE_LAMBDA = 0 reproduces the classic equal-weight permutation entropy.
+	LAMBDA <- 2 / (50 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
+							# Здесь 50 - эквивалентная длина окна для сравнения с равновзвешенной энтропией.
+							# Значение (здесь 50) должно быть не больше W, иначе чистота экспоненциального взвешивания понижается (при слишком большом значении стремимся к равновзвешенной энтропии - см. выше)
 	
 	if (n >= W) {
 		# Pre-calculate permutations for all segments of length m
@@ -145,13 +157,20 @@ foreign language=R --send-data
 		# Normalization factor: log2(m!)
 		norm_factor <- log2(factorial(m))
 		
-		# Calculate rolling entropy
+		# Exponential weights, aligned with the window layout:
+		# the oldest pattern (age W-m) first, the newest (age 0) last.
+		age_span <- W - m
+		exp_weights <- exp(-LAMBDA * age_span:0)
+		total_weight <- sum(exp_weights)
+		
+		# Calculate rolling (recency-weighted) entropy
 		for (i in W:n) {
 			# The window ends at index i. The segments contained are those 
 			# starting from i-W+1 up to i-m+1.
 			win_perms <- perms[(i-W+1):(i-m+1)]
-			counts <- table(win_perms)
-			probs <- counts / sum(counts)
+			# Weighted pattern counters (recent patterns count more)
+			wcounts <- tapply(exp_weights, win_perms, sum)
+			probs <- wcounts / total_weight
 			pe_results[i] <- (-sum(probs * log2(probs))) / norm_factor
 		}
 	}
