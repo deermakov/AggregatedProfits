@@ -231,6 +231,6 @@ list list2 = perm_entropy_series cumflowSign avgFlow avgFlowUpperEst avgFlowLowe
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.7:1]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
 list list4 = cumflowSign smartOBV
-gnuplot list4 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set xtics 10; set ytics 100; plot '-' using 1:($2) axes x1y1 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w lines title "Smart OBV" lc rgb "magenta";}
+gnuplot list4 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set y2tics 100; set xtics 10; plot '-' using 1:($2) axes x1y1 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w lines title "Smart OBV" lc rgb "magenta";}
 
 smpl full
