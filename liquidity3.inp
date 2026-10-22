@@ -1,12 +1,9 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.20.txt
+open C:\_Work\ML\AggregatedProfits\2026.10.22.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
 series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
-
-series cumflow = cum(d_flow)
-series cumflowSign = cum(d_flow_sign)
 
 scalar AGGR_WINDOW = 10
 scalar STEP = 1
@@ -46,6 +43,7 @@ endif
 smpl ok(d_flow_sign_sum_series) == 1 --restrict --permanent
 d_flow_sign = d_flow_sign_sum_series
 
+series cumflowSign = cum(d_flow_sign)
 diff PRICE
 
 series coeffSells
@@ -185,8 +183,28 @@ if !$error
 endif
 # --------------------------------------
 
-# ==========
+diff perm_entropy_series
+d_perm_entropy_series[1] = 0
 
+# --- New series: Quantiles of d_perm_entropy_series ---
+series d_perm_entropy_quantile
+foreign language=R --send-data
+	vec <- gretldata[,"d_perm_entropy_series"]
+	f <- ecdf(vec)
+	pit_res <- as.matrix(f(vec))
+
+	gretl.export(pit_res)
+	on.exit(closeAllConnections())
+end foreign
+catch matrix pit_vals = mread("pit_res.mat", 1)
+if !$error
+	d_perm_entropy_quantile = pit_vals
+endif
+# ------------------------------------------------------
+
+series smartFlowPart = d_perm_entropy_quantile < 0.5 ? (0.5 - d_perm_entropy_quantile) * 2 : 0
+tmp = smartFlowPart * d_flow_sign
+smartOBV = cum(tmp)
 
 # --- Rolling Regression ---
 
@@ -211,5 +229,8 @@ gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,60
 
 list list2 = perm_entropy_series cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.7:1]; set xtics 10; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+
+list list4 = cumflowSign smartOBV
+gnuplot list4 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set xtics 10; set ytics 100; plot '-' using 1:($2) axes x1y1 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w lines title "Smart OBV" lc rgb "magenta";}
 
 smpl full
