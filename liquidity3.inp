@@ -96,14 +96,16 @@ loop i=1..rows(changePoints)+1 --quiet
 
     else        
         # Интервал для наклона (коэффициента idx)
-        scalar studentCritValue = 2        
+        scalar studentCritValue = 2
+        scalar MAX_TREND_LENGTH = 200
         
         # Регрессия по d_flow_sign
         scalar mn = mean(d_flow_sign)
         scalar meanStdDev = sd(d_flow_sign)
-        scalar meanStdErr = meanStdDev / sqrt($nobs)
-        scalar slope_upper = mn + studentCritValue * meanStdErr
-        scalar slope_lower = mn - studentCritValue * meanStdErr
+        scalar boundary = studentCritValue * meanStdDev * sqrt( (MAX_TREND_LENGTH - $nobs)/(MAX_TREND_LENGTH * $nobs) )
+        
+        scalar slope_upper = mn + boundary
+        scalar slope_lower = mn - boundary
         avgFlow = cumflowSign[$t1] + mn * idx
         avgFlowUpperEst = cumflowSign[$t1] + slope_upper * idx
         avgFlowLowerEst = cumflowSign[$t1] + slope_lower * idx
