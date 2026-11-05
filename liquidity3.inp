@@ -130,8 +130,8 @@ endif
 # --- посчитать умный OBV
 # при этом и smartOBV и cumflowSign аккумулируются с 0 начиная с отсчета 150, а не с отсчета 0 (см. отрезание выше) 
 series smartFlowPart = d_perm_entropy_series < 0 ? (1 - d_perm_entropy_quantile) : 0
-tmp = smartFlowPart * d_flow_sign
-smartOBV = cum(tmp)
+d_smartOBV = smartFlowPart * d_flow_sign
+smartOBV = cum(d_smartOBV)
 cumflowSign -= cumflowSign[1]
 # --- of посчитать умный OBV
 
