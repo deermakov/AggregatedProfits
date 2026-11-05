@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.10.30.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.05.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -46,8 +46,109 @@ d_flow_sign = d_flow_sign_sum_series
 series cumflowSign = cum(d_flow_sign)
 diff PRICE
 
+# --- Permutation Entropy Calculation ---
+series perm_entropy_series
+foreign language=R --send-data
+	# Base R implementation to avoid dependency issues and improve speed
+	data_vec <- gretldata[,"d_flow_sign"]
+	m <- 4
+	W <- 150 # рекомендуется >= 5 * m!
+	n <- length(data_vec)
+	pe_results <- rep(0, n)
+
+	# --- Exponential weighting of pattern counters ---
+	# The counter of each pattern inside the window is multiplied by
+	# exp(-PE_LAMBDA * age), where age is the number of observations
+	# between the last point of the pattern and the end of the window
+	# (the newest pattern has age 0, the oldest has age W-m).
+	# This makes the entropy react faster to recent changes in the
+	# pattern structure. Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
+	# PE_LAMBDA = 0 reproduces the classic equal-weight permutation entropy.
+	LAMBDA <- 2 / (50 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
+							# Здесь 50 - эквивалентная длина окна для сравнения с равновзвешенной энтропией.
+							# Значение (здесь 50) должно быть не больше W, иначе чистота экспоненциального взвешивания понижается (при слишком большом значении стремимся к равновзвешенной энтропии - см. выше)
+	
+	if (n >= W) {
+		# Pre-calculate permutations for all segments of length m
+		segments <- embed(data_vec, m)
+		perms <- apply(segments, 1, function(s) paste(order(s), collapse = ""))
+		
+		# Normalization factor: log2(m!)
+		norm_factor <- log2(factorial(m))
+		
+		# Exponential weights, aligned with the window layout:
+		# the oldest pattern (age W-m) first, the newest (age 0) last.
+		age_span <- W - m
+		exp_weights <- exp(-LAMBDA * age_span:0)
+		total_weight <- sum(exp_weights)
+		
+		# Calculate rolling (recency-weighted) entropy
+		for (i in W:n) {
+			# The window ends at index i. The segments contained are those 
+			# starting from i-W+1 up to i-m+1.
+			win_perms <- perms[(i-W+1):(i-m+1)]
+			# Weighted pattern counters (recent patterns count more)
+			wcounts <- tapply(exp_weights, win_perms, sum)
+			probs <- wcounts / total_weight
+			pe_results[i] <- (-sum(probs * log2(probs))) / norm_factor
+		}
+	}
+	entropy <- as.matrix(pe_results)
+	gretl.export(entropy)
+	on.exit(closeAllConnections())
+end foreign
+
+catch matrix pe_vals = mread("entropy.mat", 1)
+if !$error
+    perm_entropy_series = pe_vals
+endif
+# --------------------------------------
+
+diff perm_entropy_series
+d_perm_entropy_series[1] = 0
+
+# отрезать первые (W-1) значений, т.к. для них энтропия не посчитана и квантили тоже не могут быть определены
+smpl obs >= 150 --restrict --permanent
+setobs 1 1 --special-time-series
+
+# --- New series: Quantiles of d_perm_entropy_series ---
+series d_perm_entropy_quantile
+foreign language=R --send-data
+	vec <- gretldata[,"d_perm_entropy_series"]
+	f <- ecdf(vec)
+	pit_res <- as.matrix(f(vec))
+
+	gretl.export(pit_res)
+	on.exit(closeAllConnections())
+end foreign
+catch matrix pit_vals = mread("pit_res.mat", 1)
+if !$error
+	d_perm_entropy_quantile = pit_vals
+endif
+# ------------------------------------------------------
+
+# --- посчитать умный OBV
+# при этом и smartOBV и cumflowSign аккумулируются с 0 начиная с отсчета 150, а не с отсчета 0 (см. отрезание выше) 
+series smartFlowPart = d_perm_entropy_series < 0 ? (1 - d_perm_entropy_quantile) : 0
+tmp = smartFlowPart * d_flow_sign
+smartOBV = cum(tmp)
+cumflowSign -= cumflowSign[1]
+# --- of посчитать умный OBV
+
+# --- Rolling Regression ---
 series coeffSells
 series coeffBuys
+
+loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
+    smpl (obs >= i - REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
+    #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
+    ols d_PRICE sells buys --quiet
+    coeffSells[i] = $coeff[1]
+    coeffBuys[i] = $coeff[2]
+    smpl full --quiet
+    setobs 1 1 --special-time-series
+endloop
+# --- of Rolling Regression ---
 
 # ========== Средние значения flow, structural breaks of
 smpl --full
@@ -61,7 +162,7 @@ series trend_size
 
 foreign language=R --send-data
 	library("cpm")
-	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=2000, startup=10, lambda=NA)
+	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=370, startup=100, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
@@ -145,106 +246,7 @@ endloop
 else
     avgFlow = mean(d_flow_sign)
 endif
-
-# --- Permutation Entropy Calculation ---
-series perm_entropy_series
-foreign language=R --send-data
-	# Base R implementation to avoid dependency issues and improve speed
-	data_vec <- gretldata[,"d_flow_sign"]
-	m <- 4
-	W <- 150 # рекомендуется >= 5 * m!
-	n <- length(data_vec)
-	pe_results <- rep(0, n)
-
-	# --- Exponential weighting of pattern counters ---
-	# The counter of each pattern inside the window is multiplied by
-	# exp(-PE_LAMBDA * age), where age is the number of observations
-	# between the last point of the pattern and the end of the window
-	# (the newest pattern has age 0, the oldest has age W-m).
-	# This makes the entropy react faster to recent changes in the
-	# pattern structure. Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
-	# PE_LAMBDA = 0 reproduces the classic equal-weight permutation entropy.
-	LAMBDA <- 2 / (50 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
-							# Здесь 50 - эквивалентная длина окна для сравнения с равновзвешенной энтропией.
-							# Значение (здесь 50) должно быть не больше W, иначе чистота экспоненциального взвешивания понижается (при слишком большом значении стремимся к равновзвешенной энтропии - см. выше)
-	
-	if (n >= W) {
-		# Pre-calculate permutations for all segments of length m
-		segments <- embed(data_vec, m)
-		perms <- apply(segments, 1, function(s) paste(order(s), collapse = ""))
-		
-		# Normalization factor: log2(m!)
-		norm_factor <- log2(factorial(m))
-		
-		# Exponential weights, aligned with the window layout:
-		# the oldest pattern (age W-m) first, the newest (age 0) last.
-		age_span <- W - m
-		exp_weights <- exp(-LAMBDA * age_span:0)
-		total_weight <- sum(exp_weights)
-		
-		# Calculate rolling (recency-weighted) entropy
-		for (i in W:n) {
-			# The window ends at index i. The segments contained are those 
-			# starting from i-W+1 up to i-m+1.
-			win_perms <- perms[(i-W+1):(i-m+1)]
-			# Weighted pattern counters (recent patterns count more)
-			wcounts <- tapply(exp_weights, win_perms, sum)
-			probs <- wcounts / total_weight
-			pe_results[i] <- (-sum(probs * log2(probs))) / norm_factor
-		}
-	}
-	entropy <- as.matrix(pe_results)
-	gretl.export(entropy)
-	on.exit(closeAllConnections())
-end foreign
-
-catch matrix pe_vals = mread("entropy.mat", 1)
-if !$error
-    perm_entropy_series = pe_vals
-endif
-# --------------------------------------
-
-diff perm_entropy_series
-d_perm_entropy_series[1] = 0
-
-# отрезать первые (W-1) значений, т.к. для них энтропия не посчитана
-smpl obs >= 150 --restrict --permanent
-setobs 1 1 --special-time-series
-
-# --- New series: Quantiles of d_perm_entropy_series ---
-series d_perm_entropy_quantile
-foreign language=R --send-data
-	vec <- gretldata[,"d_perm_entropy_series"]
-	f <- ecdf(vec)
-	pit_res <- as.matrix(f(vec))
-
-	gretl.export(pit_res)
-	on.exit(closeAllConnections())
-end foreign
-catch matrix pit_vals = mread("pit_res.mat", 1)
-if !$error
-	d_perm_entropy_quantile = pit_vals
-endif
-# ------------------------------------------------------
-
-# --- посчитать умный OBV
-
-series smartFlowPart = d_perm_entropy_quantile < 0.5 ? (0.5 - d_perm_entropy_quantile) * 2 : 0
-tmp = smartFlowPart * d_flow_sign
-smartOBV = cum(tmp)
-smartOBV += cumflowSign[1]
-
-# --- Rolling Regression ---
-
-loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
-    smpl (obs >= i - REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
-    #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
-    ols d_PRICE sells buys --quiet
-    coeffSells[i] = $coeff[1]
-    coeffBuys[i] = $coeff[2]
-    smpl full --quiet
-    setobs 1 1 --special-time-series
-endloop
+# ========== of Средние значения flow, structural breaks of
 
 series med_perm_entropy_series = median(perm_entropy_series)
 
