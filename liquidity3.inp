@@ -152,6 +152,7 @@ endloop
 
 # ========== Средние значения flow, structural breaks of
 smpl --full
+matrix d_flow_sign_full = d_flow_sign
 series avgFlow
 series avgFlowUpperEst
 series avgFlowLowerEst
@@ -198,26 +199,29 @@ loop i=1..rows(changePoints)+1 --quiet
     else        
         # Интервал для наклона (коэффициента idx)
         # Оценка среднего значения d_flow_sign методом Moving Block Bootstrap (MBB) с использованием фактических данных
-        
+        err= mwrite(d_flow_sign_full,"d_flow_sign_full.mat",1)
+
         foreign language=R --send-data
             d <- gretldata[,"d_flow_sign"]
             n <- length(d)
+            d_full <- A<-gretl.loadmat("d_flow_sign_full.mat")
+            nf <- length(d_full)
             # Параметры MBB
             M <- 10000          # Количество итераций бутстрапа
             N_LENGTH <- 150     # Длина оцениваемой выборки (должна перекрывать ожидаемую длину трендов)
-            L <- max(2, floor(n^(1/3))) # Размер блока (Moving Block size)
+            L <- max(2, floor(nf^(1/3))) # Размер блока (Moving Block size)
 
             res_lo <- 0; res_hi <- 0 # По умолчанию границы равны среднему
             
-            if (n >= L) {
+            if (nf >= L) {
                 N <- max(n + 1, N_LENGTH)
                 boot_means <- numeric(M)
                 for (m in 1:M) {
                     current_sample <- d # в начало генерируемого интервала помещаем текущие данные
                     while (length(current_sample) < N) { # далее дополняем генерируемый интервал методом MBB
-                        # Выбираем случайный блок из исходной выборки
-                        start_idx <- sample(1:(n - L + 1), 1)
-                        block <- d[start_idx:(start_idx + L - 1)]
+                        # Выбираем случайный блок (из полной выборки, т.к. это даст более широкие границы для коротких интервалов !)
+                        start_idx <- sample(1:(nf - L + 1), 1)
+                        block <- d_full[start_idx:(start_idx + L - 1)]
                         current_sample <- c(current_sample, block)
                     }
                     # Обрезаем до длины N
