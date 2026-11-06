@@ -204,7 +204,7 @@ loop i=1..rows(changePoints)+1 --quiet
         foreign language=R --send-data
             d <- gretldata[,"d_flow_sign"]
             n <- length(d)
-            d_full <- A<-gretl.loadmat("d_flow_sign_full.mat")
+            d_full <- gretl.loadmat("d_flow_sign_full.mat")
             nf <- length(d_full)
             # Параметры MBB
             M <- 10000          # Количество итераций бутстрапа
@@ -309,8 +309,8 @@ loop i=1..rows(changePoints_smartOBV)+1 --quiet
         # Интервал для наклона (коэффициента idx)
         # Оценка среднего значения d_smartOBV
         
-        scalar mn = mean(d_smartOBV)        
-		avgSmartOBV = smartOBV[$t1] + mn * idx
+        #scalar mn = mean(d_smartOBV)        
+		#avgSmartOBV = smartOBV[$t1] + mn * idx
         
         # avgSmartOBV = $coeff[1] + $coeff[2] * idx
     endif    
