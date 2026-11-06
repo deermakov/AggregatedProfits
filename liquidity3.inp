@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.05.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.06.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -197,31 +197,35 @@ loop i=1..rows(changePoints)+1 --quiet
 
     else        
         # Интервал для наклона (коэффициента idx)
-        # Оценка среднего значения d_flow_sign с учетом автокорреляции через glmmTMB (Laplace approximation)
-        scalar mn = mean(d_flow_sign)
+        # Оценка среднего значения d_flow_sign методом Moving Block Bootstrap (MBB) с использованием фактических данных
         
         foreign language=R --send-data
-            library(glmmTMB)
             d <- gretldata[,"d_flow_sign"]
             n <- length(d)
-            res_lo <- mean(d); res_hi <- mean(d) # Default values
+            # Параметры MBB
+            M <- 1000           # Количество итераций бутстрапа
+            N_LENGTH <- 100     # Длина оцениваемой выборки (должна перекрывать ожидаемую длину трендов)
+            L <- max(2, floor(n^(1/3))) # Размер блока (Moving Block size)
+
+            res_lo <- 0; res_hi <- 0 # По умолчанию границы равны среднему
             
-            if (n > 10) {
-                try({
-                    df_r <- data.frame(y = d, t = 1:n)
-                    # Модель AR(1)
-                    fit <- glmmTMB(y ~ 1 + ar1(t + 0 | 1), data = df_r, family = gaussian())
-                    
-                    # Извлекаем таблицу коэффициентов напрямую из summary
-                    # Это самый надежный способ избежать ошибок с размерностью матриц vcov
-                    coef_table <- summary(fit)$coefficients
-                    
-                    mu <- coef_table[1]$cond[1]
-                    se <- coef_table[1]$cond[2]
-                    
-                    res_lo <<- mu - 1.96 * se
-                    res_hi <<- mu + 1.96 * se
-                }, silent = TRUE)
+            if (n >= L) {
+                N <- max(n + 1, N_LENGTH)
+                boot_means <- numeric(M)
+                for (m in 1:M) {
+                    current_sample <- d # в начало генерируемого интервала помещаем текущие данные
+                    while (length(current_sample) < N) { # далее дополняем генерируемый интервал методом MBB
+                        # Выбираем случайный блок из исходной выборки
+                        start_idx <- sample(1:(n - L + 1), 1)
+                        block <- d[start_idx:(start_idx + L - 1)]
+                        current_sample <- c(current_sample, block)
+                    }
+                    # Обрезаем до длины N
+                    current_sample <- current_sample[1:N]
+                    boot_means[m] <- mean(current_sample)
+                }
+                res_lo <- quantile(boot_means, 0.025)
+                res_hi <- quantile(boot_means, 0.975)
             }
             boot_ci <- matrix(c(res_lo, res_hi), nrow = 1)
             gretl.export(boot_ci)
@@ -231,6 +235,7 @@ loop i=1..rows(changePoints)+1 --quiet
         catch matrix boot_ci = mread("boot_ci.mat", 1)
 
         if !$error
+            scalar mn = mean(d_flow_sign)
             scalar slope_lower = boot_ci[1,1]
             scalar slope_upper = boot_ci[1,2]
             avgFlow = cumflowSign[$t1] + mn * idx
@@ -248,20 +253,85 @@ else
 endif
 # ========== of Средние значения flow, structural breaks of
 
+# --- Поиск структурных разрывов smartOBV (Iterative CUSUM/Binary Segmentation) ---
+series avgSmartOBV
+
+series smart_trend_length
+series smart_trend_size
+
+foreign language=R --send-data
+    library(strucchange)
+    
+    # Берем дифференцированный ряд (изменения среднего в нем = изменения тренда в smartOBV)
+    y <- gretldata[,"d_smartOBV"]
+    
+    # Обработка NA, которые возникают из-за отрезания начала ряда
+    valid_idx <- which(!is.na(y))
+    y_clean <- y[valid_idx]
+    
+    # breakpoints() использует статистику на основе CUSUM для поиска оптимального числа точек
+    # Модель 'y ~ 1' ищет изменения среднего (mean shifts)
+    bp_model <- breakpoints(y_clean ~ 1)
+    
+    # Извлекаем индексы найденных точек
+    cp_indices <- bp_model$breakpoints
+    
+    res_matrix <- as.matrix(cp_indices)
+    gretl.export(res_matrix)
+    on.exit(closeAllConnections())
+end foreign
+catch matrix changePoints_smartOBV = mread("res_matrix.mat", 1)
+
+if !$error
+loop i=1..rows(changePoints_smartOBV)+1 --quiet
+    if (i == 1)
+        smpl obs<=changePoints_smartOBV[i,1] --restrict --quiet
+    else
+        if (i>rows(changePoints_smartOBV))
+            smpl obs>changePoints_smartOBV[i-1,1] --restrict --quiet
+        else
+            smpl obs>changePoints_smartOBV[i-1,1] && obs <=changePoints_smartOBV[i,1] --restrict --quiet
+        endif   
+    endif
+
+    setobs 1 1 --special-time-series
+    
+    series idx = index - index[$t1]
+    ols smartOBV 0 idx --quiet
+        
+    if (i <= rows(changePoints_smartOBV))
+        avgSmartOBV = $coeff[1] + $coeff[2] * idx
+        
+        smart_trend_length[$t2] = $nobs
+        smart_trend_size[$t2] = smartOBV[$t2] - smartOBV[$t1]
+
+    else        
+        # Интервал для наклона (коэффициента idx)
+        # Оценка среднего значения d_smartOBV
+        scalar mn = mean(d_smartOBV)        
+
+		avgSmartOBV = smartOBV[$t1] + mn * idx
+    endif    
+    
+    smpl full --quiet
+    setobs 1 1 --special-time-series
+endloop
+else
+    avgFlow = mean(d_flow_sign)
+endif
+# --- of Поиск структурных разрывов smartOBV (Iterative CUSUM/Binary Segmentation)  ---
+
 series med_perm_entropy_series = median(perm_entropy_series)
 
 smpl obs > ($t2 - 400/STEP) --restrict
 
-#gnuplot PRICE --time-series --with-lines --output=display
-
-#gnuplot coeffSells coeffBuys --time-series --with-lines --single-yaxis --output=display
 list list1 = coeffSells coeffBuys PRICE
 gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 50; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
 
 list list2 = perm_entropy_series med_perm_entropy_series cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.7:1]; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy (median)" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
-list list3 = smartOBV cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
-gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+list list3 = smartOBV avgSmartOBV cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
+gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y1 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
 smpl full
