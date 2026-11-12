@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.06.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.12.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -104,17 +104,14 @@ if !$error
 endif
 # --------------------------------------
 
-diff perm_entropy_series
-d_perm_entropy_series[1] = 0
-
 # отрезать первые (W-1) значений, т.к. для них энтропия не посчитана и квантили тоже не могут быть определены
 smpl obs >= 150 --restrict --permanent
 setobs 1 1 --special-time-series
 
 # --- New series: Quantiles of d_perm_entropy_series ---
-series d_perm_entropy_quantile
+series perm_entropy_quantile
 foreign language=R --send-data
-	vec <- gretldata[,"d_perm_entropy_series"]
+	vec <- gretldata[,"perm_entropy_series"]
 	f <- ecdf(vec)
 	pit_res <- as.matrix(f(vec))
 
@@ -123,13 +120,14 @@ foreign language=R --send-data
 end foreign
 catch matrix pit_vals = mread("pit_res.mat", 1)
 if !$error
-	d_perm_entropy_quantile = pit_vals
+	perm_entropy_quantile = pit_vals
 endif
 # ------------------------------------------------------
 
 # --- посчитать умный OBV
+diff perm_entropy_quantile
 # при этом и smartOBV и cumflowSign аккумулируются с 0 начиная с отсчета 150, а не с отсчета 0 (см. отрезание выше) 
-series smartFlowPart = d_perm_entropy_series < 0 ? (1 - d_perm_entropy_quantile) : 0
+series smartFlowPart = d_perm_entropy_quantile < 0 ? (1 - d_perm_entropy_quantile) : 0
 d_smartOBV = smartFlowPart * d_flow_sign
 smartOBV = cum(d_smartOBV)
 cumflowSign -= cumflowSign[1]
@@ -333,7 +331,13 @@ gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,60
 list list2 = perm_entropy_series med_perm_entropy_series cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
 gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.7:1]; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy (median)" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
-list list3 = smartOBV avgSmartOBV cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
-gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y1 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+#list list3 = smartOBV avgSmartOBV cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
+#gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y1 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+
+smartOBV_tmp = smartOBV - (smartOBV[$t1] - cumflowSign[$t1])
+avgSmartOBV_tmp = avgSmartOBV - (smartOBV[$t1] - cumflowSign[$t1])
+list list3 = smartOBV_tmp avgSmartOBV_tmp cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
+gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y2 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y2 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+
 
 smpl full
