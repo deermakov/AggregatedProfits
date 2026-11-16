@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.12.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.16.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -64,9 +64,8 @@ foreign language=R --send-data
 	# This makes the entropy react faster to recent changes in the
 	# pattern structure. Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
 	# PE_LAMBDA = 0 reproduces the classic equal-weight permutation entropy.
-	LAMBDA <- 2 / (50 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
-							# Здесь 50 - эквивалентная длина окна для сравнения с равновзвешенной энтропией.
-							# Значение (здесь 50) должно быть не больше W, иначе чистота экспоненциального взвешивания понижается (при слишком большом значении стремимся к равновзвешенной энтропии - см. выше)
+	LAMBDA <- 1 / (50 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
+							# Здесь 50 дает half-life = 35, т.е. последнее значение из выборки длиной W = 150 имеет вес < 1/16, т.е. близко к 0, что и требовалось получить.
 	
 	if (n >= W) {
 		# Pre-calculate permutations for all segments of length m
