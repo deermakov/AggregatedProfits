@@ -157,7 +157,11 @@ series trend_size
 
 foreign language=R --send-data
 	library("cpm")
-	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=1000, startup=100, lambda=NA)
+
+	# доавление jitter для устранения ties (они плохо влияют на тесты в cpm), т.к. в анализируемом ряду очень много ties - одинаковых значений	
+	set.seed(42)
+	jittered_data <- jitter(gretldata[,"d_flow_sign"], amount = 1e-4) # Параметр amount задает максимальную амплитуду шума (от -0.0001 до +0.0001)
+	res <- processStream(jittered_data, "Mann-Whitney", ARL0=50000, startup=100, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
@@ -202,7 +206,7 @@ loop i=1..rows(changePoints)+1 --quiet
             nf <- length(d_full)
             # Параметры MBB
             M <- 10000          # Количество итераций бутстрапа
-            N_LENGTH <- 100     # Длина оцениваемой выборки (должна перекрывать ожидаемую длину трендов)
+            N_LENGTH <- 200     # Длина оцениваемой выборки (должна перекрывать ожидаемую длину трендов)
             L <- max(2, floor(nf^(1/3))) # Размер блока (Moving Block size)
 
             res_lo <- 0; res_hi <- 0 # По умолчанию границы равны среднему
@@ -259,12 +263,15 @@ series smart_trend_size
 
 foreign language=R --send-data
     library("cpm")
-    vec <- gretldata[,"d_smartOBV"]
+	# доавление jitter для устранения ties (они плохо влияют на тесты в cpm), т.к. в анализируемом ряду очень много ties - одинаковых значений	
+	set.seed(42)
+	jittered_data <- jitter(gretldata[,"d_smartOBV"], amount = 1e-4) # Параметр amount задает максимальную амплитуду шума (от -0.0001 до +0.0001)
+    vec <- jittered_data
 	STARTUP <- 100
     nz_idx <- which(vec != 0)
     changePoints_smartOBV2 <- matrix(nrow=0, ncol=1)
     if (length(nz_idx) > STARTUP) {
-        res <- processStream(vec[nz_idx], "Lepage", ARL0=1000, startup=STARTUP, lambda=NA)
+        res <- processStream(vec[nz_idx], "Mann-Whitney", ARL0=50000, startup=STARTUP, lambda=NA)
         cp_raw <- as.matrix(res$changePoints)
         if (nrow(cp_raw) > 0) {
             changePoints_smartOBV2 <- nz_idx[cp_raw]
