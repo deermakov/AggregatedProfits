@@ -1,13 +1,12 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.16.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.17.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
 series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
 
-scalar AGGR_WINDOW = 10
 scalar STEP = 1
-scalar REGRESS_WINDOW = 50
+scalar LIQUIDITY_REGRESS_WINDOW = 300 # = W (см. ниже), чтобы можно было сопоставлять ликвидность и энтропию flow
 
 series sells
 series buys
@@ -15,30 +14,26 @@ series buys
 # --- Aggregation of d_flow_sign ---
 series d_flow_sign_sum_series = 0/0
 scalar d_flow_sign_sum = 0
-scalar cnt = 0
 scalar buy_sum = 0
 scalar sell_sum = 0
+scalar cur_mcsec = TRADETIME_MSEC[1]
+
 loop i=1..$nobs --quiet
-    if (cnt == AGGR_WINDOW)
+    if (TRADETIME_MSEC[i] != cur_mcsec)
         d_flow_sign_sum_series[i-1] = d_flow_sign_sum
         sells[i-1] = sell_sum
         buys[i-1] = buy_sum
 
         d_flow_sign_sum = d_flow_sign[i]        
-        cnt = 1
         buy_sum = d_flow_sign[i] == 1 ? 1 : 0
         sell_sum = d_flow_sign[i] == -1 ? -1 : 0
+        cur_mcsec = TRADETIME_MSEC[i]
     else
-        cnt++
-        
         d_flow_sign_sum += d_flow_sign[i]
         buy_sum += (d_flow_sign[i] == 1 ? 1 : 0)
         sell_sum += (d_flow_sign[i] == -1 ? -1 : 0)
     endif
 endloop
-if $nobs > 0
-    d_flow_sign_sum_series[$nobs] = d_flow_sign_sum
-endif
 # ------------------------------------------
 smpl ok(d_flow_sign_sum_series) == 1 --restrict --permanent
 d_flow_sign = d_flow_sign_sum_series
@@ -52,7 +47,7 @@ foreign language=R --send-data
 	# Base R implementation to avoid dependency issues and improve speed
 	data_vec <- gretldata[,"d_flow_sign"]
 	m <- 4
-	W <- 150 # рекомендуется >= 5 * m!
+	W <- 300 # рекомендуется >= 5 * m!
 	n <- length(data_vec)
 	pe_results <- rep(0, n)
 
@@ -104,7 +99,7 @@ endif
 # --------------------------------------
 
 # отрезать первые (W-1) значений, т.к. для них энтропия не посчитана и квантили тоже не могут быть определены
-smpl obs >= 150 --restrict --permanent
+smpl obs >= LIQUIDITY_REGRESS_WINDOW --restrict --permanent
 setobs 1 1 --special-time-series
 
 # --- New series: Quantiles of d_perm_entropy_series ---
@@ -125,23 +120,25 @@ endif
 
 # --- посчитать умный OBV
 diff perm_entropy_quantile
-# при этом и smartOBV и cumflowSign аккумулируются с 0 начиная с отсчета 150, а не с отсчета 0 (см. отрезание выше) 
-series smartFlowPart = d_perm_entropy_quantile < 0 ? (1 - d_perm_entropy_quantile) : 0
+# при этом и smartOBV и cumflowSign аккумулируются с 0 начиная с отсчета № LIQUIDITY_REGRESS_WINDOW, а не с отсчета № 0 (см. отрезание выше) 
+series smartFlowPart = d_perm_entropy_quantile < 0 ? 1 : 0 # если энтропия понижается от сделки, то зачитываем весь объем этой сделки целиком (т.к. это одна сделка от одного инициатора и поэтому странно учитывать только часть ее объема)
 d_smartOBV = smartFlowPart * d_flow_sign
 smartOBV = cum(d_smartOBV)
 cumflowSign -= cumflowSign[1]
 # --- of посчитать умный OBV
 
-# --- Rolling Regression ---
+# --- Вычисление ликвидности: rolling regression d_PRICE на buy- и sell-flow---
 series coeffSells
 series coeffBuys
 
-loop for (i = REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
-    smpl (obs >= i - REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
+loop for (i = LIQUIDITY_REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
+    smpl (obs >= i - LIQUIDITY_REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
     #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
     ols d_PRICE sells buys --quiet
-    coeffSells[i] = $coeff[1]
-    coeffBuys[i] = $coeff[2]
+    if rows($coeff) == 2
+        coeffSells[i] = $coeff[1]
+        coeffBuys[i] = $coeff[2]
+    endif
     smpl full --quiet
     setobs 1 1 --special-time-series
 endloop
@@ -160,7 +157,7 @@ series trend_size
 
 foreign language=R --send-data
 	library("cpm")
-	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=370, startup=100, lambda=NA)
+	res <- processStream(gretldata[,"d_flow_sign"], "Lepage", ARL0=1000, startup=100, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
@@ -263,11 +260,11 @@ series smart_trend_size
 foreign language=R --send-data
     library("cpm")
     vec <- gretldata[,"d_smartOBV"]
-	STARTUP <- 50
+	STARTUP <- 100
     nz_idx <- which(vec != 0)
     changePoints_smartOBV2 <- matrix(nrow=0, ncol=1)
     if (length(nz_idx) > STARTUP) {
-        res <- processStream(vec[nz_idx], "Lepage", ARL0=370, startup=STARTUP, lambda=NA)
+        res <- processStream(vec[nz_idx], "Lepage", ARL0=1000, startup=STARTUP, lambda=NA)
         cp_raw <- as.matrix(res$changePoints)
         if (nrow(cp_raw) > 0) {
             changePoints_smartOBV2 <- nz_idx[cp_raw]
@@ -322,13 +319,13 @@ endif
 
 series med_perm_entropy_series = median(perm_entropy_series)
 
-smpl obs > ($t2 - 400/STEP) --restrict
+smpl obs > ($t2 - LIQUIDITY_REGRESS_WINDOW * 2 /STEP) --restrict
 
 list list1 = coeffSells coeffBuys PRICE
 gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 50; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
 
 list list2 = perm_entropy_series med_perm_entropy_series cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
-gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.7:1]; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy (median)" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.5:1]; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy (median)" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
 #list list3 = smartOBV avgSmartOBV cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
 #gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y1 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
