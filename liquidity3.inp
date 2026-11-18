@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.17.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.18.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -120,6 +120,7 @@ endif
 
 # --- посчитать умный OBV
 diff perm_entropy_quantile
+d_perm_entropy_quantile[1] = 0
 # при этом и smartOBV и cumflowSign аккумулируются с 0 начиная с отсчета № LIQUIDITY_REGRESS_WINDOW, а не с отсчета № 0 (см. отрезание выше) 
 series smartFlowPart = d_perm_entropy_quantile < 0 ? 1 : 0 # если энтропия понижается от сделки, то зачитываем весь объем этой сделки целиком (т.к. это одна сделка от одного инициатора и поэтому странно учитывать только часть ее объема)
 d_smartOBV = smartFlowPart * d_flow_sign
@@ -158,10 +159,12 @@ series trend_size
 foreign language=R --send-data
 	library("cpm")
 
-	# доавление jitter для устранения ties (они плохо влияют на тесты в cpm), т.к. в анализируемом ряду очень много ties - одинаковых значений	
-	set.seed(42)
-	jittered_data <- jitter(gretldata[,"d_flow_sign"], amount = 1e-4) # Параметр amount задает максимальную амплитуду шума (от -0.0001 до +0.0001)
-	res <- processStream(jittered_data, "Mann-Whitney", ARL0=50000, startup=100, lambda=NA)
+	# Pre-whitening: AR residuals before breaking points detection
+	ar_fit <- ar(gretldata[,"d_flow_sign"], order.max = 50)
+	resid <- ar_fit$resid
+	resid[is.na(resid)] <- 0 # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
+
+	res <- processStream(resid, "Mann-Whitney", ARL0=5000, startup=100, lambda=NA)
 	changePoints <- as.matrix(res$changePoints)
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
@@ -263,15 +266,18 @@ series smart_trend_size
 
 foreign language=R --send-data
     library("cpm")
-	# доавление jitter для устранения ties (они плохо влияют на тесты в cpm), т.к. в анализируемом ряду очень много ties - одинаковых значений	
-	set.seed(42)
-	jittered_data <- jitter(gretldata[,"d_smartOBV"], amount = 1e-4) # Параметр amount задает максимальную амплитуду шума (от -0.0001 до +0.0001)
-    vec <- jittered_data
+
+	# Pre-whitening: AR residuals before breaking points detection
+	ar_fit <- ar(gretldata[,"d_smartOBV"], order.max = 50)
+	resid <- ar_fit$resid
+	resid[is.na(resid)] <- 0 # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
+
+    vec <- resid
 	STARTUP <- 100
     nz_idx <- which(vec != 0)
     changePoints_smartOBV2 <- matrix(nrow=0, ncol=1)
     if (length(nz_idx) > STARTUP) {
-        res <- processStream(vec[nz_idx], "Mann-Whitney", ARL0=50000, startup=STARTUP, lambda=NA)
+        res <- processStream(vec[nz_idx], "Mann-Whitney", ARL0=5000, startup=STARTUP, lambda=NA)
         cp_raw <- as.matrix(res$changePoints)
         if (nrow(cp_raw) > 0) {
             changePoints_smartOBV2 <- nz_idx[cp_raw]
