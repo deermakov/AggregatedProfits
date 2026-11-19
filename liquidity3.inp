@@ -159,13 +159,38 @@ series trend_size
 foreign language=R --send-data
 	library("cpm")
 
-	# Pre-whitening: AR residuals before breaking points detection
-	ar_fit <- ar(gretldata[,"d_flow_sign"], order.max = 50)
-	resid <- ar_fit$resid
-	resid[is.na(resid)] <- 0 # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
-
-	res <- processStream(resid, "Mann-Whitney", ARL0=5000, startup=100, lambda=NA)
-	changePoints <- as.matrix(res$changePoints)
+	# Используется Pre-whitening: обучить AR-модель и искать breaking points на её остатках
+	# Реализован итеративный поиск structural breaks с переобучением AR-модели:
+	# 	после обнаружения каждой breaking point AR модель переобучается на данных, идущих после этой breaking point (чтобы остатки не содержали информации о прошлых закрытых интервалах),
+	# 	повторный поиск выполняется рекурсивно, пока не будут обработаны все интервалы.
+	d <- gretldata[,"d_flow_sign"]
+	n <- length(d)
+	detect <- function(start, end) {
+		STARTUP <- 100
+	    found <- numeric(0)
+	    segment_len <- end - start + 1
+	    if (segment_len >= STARTUP) {
+	        segment <- d[start:end]
+	        ar_fit <- ar(segment, order.max = 50)
+	        resid <- ar_fit$resid
+			resid <- resid[(ar_fit$order + 1): length(resid)] # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
+	        res <- processStream(resid, "Mann-Whitney", ARL0=1000, startup=STARTUP, lambda=NA)
+	        cp_local <- as.matrix(res$changePoints)
+	        if (nrow(cp_local) > 0) {
+	            cp_global <- as.numeric(start + ar_fit$order + cp_local[1, 1] - 1)
+	            found <- c(found, cp_global)
+			found <- c(found, detect(cp_global, end))
+	        }
+	    }
+	    found
+	}
+	all_cps <- detect(1, n)
+	if (length(all_cps) > 0) {
+	    changePoints <- matrix(all_cps, nrow = length(all_cps), ncol = 1)
+	    changePoints <- changePoints[order(changePoints[, 1]), , drop = FALSE]
+	} else {
+	    changePoints <- matrix(0, nrow = 0, ncol = 1)
+	}
 	gretl.export(changePoints)
 	on.exit(closeAllConnections())
 end foreign
