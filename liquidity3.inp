@@ -332,7 +332,7 @@ foreign language=R --send-data
 	all_cps <- detect(1, n)
 	if (length(all_cps) > 0) {
 	    changePoints_smartOBV <- matrix(all_cps, nrow = length(all_cps), ncol = 1)
-	    changePoints_smartOBV <- changePoints[order(changePoints[, 1]), , drop = FALSE]
+	    changePoints_smartOBV <- changePoints_smartOBV[order(changePoints_smartOBV[, 1]), , drop = FALSE]
 	} else {
 	    changePoints_smartOBV <- matrix(0, nrow = 0, ncol = 1)
 	}
