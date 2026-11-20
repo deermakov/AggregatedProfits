@@ -11,6 +11,18 @@ scalar LIQUIDITY_REGRESS_WINDOW = 300 # = W (см. ниже), чтобы мож�
 series sells
 series buys
 
+# --- Переводим строковый ряд TRADETIME в секунды от начала суток
+series t_sec
+loop i = 1..$nobs -q
+    string s = TRADETIME[i]
+    scalar h = 0
+    scalar m = 0
+    scalar sec = 0
+    # Разбираем строку формата "ч:мм:сс" или "чч:мм:сс"
+    sscanf(s, "%d:%d:%d", h, m, sec)
+    t_sec[i] = h * 3600 + m * 60 + sec
+endloop
+
 # --- Aggregation of d_flow_sign ---
 series d_flow_sign_sum_series = 0/0
 scalar d_flow_sign_sum = 0
@@ -372,13 +384,30 @@ endif
 
 series med_perm_entropy_series = median(perm_entropy_series)
 
-smpl obs > ($t2 - LIQUIDITY_REGRESS_WINDOW * 2 /STEP) --restrict
+# --- Вычисляем время начала для графиков (время последнего события минус N минут)
+scalar N = 30
+scalar last_idx = $nobs
+scalar target_time = t_sec[last_idx] - N * 60
+
+scalar found_idx
+loop i = last_idx..1 --decr -q
+    # Ищем первое событие, которое произошло в целевое время или раньше
+    if t_sec[i] <= target_time
+        found_idx = i
+        break
+    endif
+endloop
+
+#smpl obs > ($t2 - LIQUIDITY_REGRESS_WINDOW * 2 /STEP) --restrict
+smpl obs > found_idx --restrict
+
+# --- of Вычисляем время начала для графиков
 
 list list1 = coeffSells coeffBuys PRICE
-gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 50; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
+gnuplot list1 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.001; set yrange[0:0.005]; set xtics 100; set y2tics 0.1; plot '-' using 1:($2) axes x1y1 w lines title "liquidity for sells" lc rgb "red", '-' using 1:($2) axes x1y1 w lines title "liquidity for buys" lc rgb "green", '-' using 1:($2) axes x1y2 w lines title "price" lc rgb "blue";}
 
 list list2 = perm_entropy_series med_perm_entropy_series cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
-gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.5:1]; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy (median)" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 0.1; set yrange[0.5:1]; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy" lc rgb "purple", '-' using 1:($2) axes x1y1 w lines title "Permutation Entropy (median)" lc rgb "purple", '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
 #list list3 = smartOBV avgSmartOBV cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
 #gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y1 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y1 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
@@ -386,7 +415,7 @@ gnuplot list2 --time-series --output=display {set terminal pngcairo size 1600,60
 smartOBV_tmp = smartOBV - (smartOBV[$t1] - cumflowSign[$t1])
 avgSmartOBV_tmp = avgSmartOBV - (smartOBV[$t1] - cumflowSign[$t1])
 list list3 = smartOBV_tmp avgSmartOBV_tmp cumflowSign avgFlow avgFlowUpperEst avgFlowLowerEst
-gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 50; set y2tics 100; plot '-' using 1:($2) axes x1y2 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y2 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
+gnuplot list3 --time-series --output=display {set terminal pngcairo size 1600,600; set tics font ", 12"; set ytics 100; set xtics 100; set y2tics 100; plot '-' using 1:($2) axes x1y2 w lines title "Smart OBV" lc rgb "magenta", '-' using 1:($2) axes x1y2 w points title "avg Smart OBV" lc rgb "magenta" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w lines title "flow" lc rgb "blue", '-' using 1:($2) axes x1y2 w points title "avg flow" lc rgb "blue" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow upper est" lc rgb "green" pt 7 ps 0.3, '-' using 1:($2) axes x1y2 w points title "avg flow lower est" lc rgb "red" pt 7 ps 0.3;}
 
 
 smpl full
