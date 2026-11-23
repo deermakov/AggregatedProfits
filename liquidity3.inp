@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.20.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.23.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -53,6 +53,8 @@ d_flow_sign = d_flow_sign_sum_series
 series cumflowSign = cum(d_flow_sign)
 diff PRICE
 
+genr index
+
 # --- Permutation Entropy Calculation ---
 series perm_entropy_series
 foreign language=R --send-data
@@ -71,7 +73,7 @@ foreign language=R --send-data
 	# This makes the entropy react faster to recent changes in the
 	# pattern structure. Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
 	# PE_LAMBDA = 0 reproduces the classic equal-weight permutation entropy.
-	LAMBDA <- 1 / (50 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
+	LAMBDA <- 1 / (100 + 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
 							# Здесь 50 дает half-life = 35, т.е. последнее значение из выборки длиной W = 150 имеет вес < 1/16, т.е. близко к 0, что и требовалось получить.
 	
 	if (n >= W) {
@@ -147,7 +149,12 @@ series coeffBuys
 loop for (i = LIQUIDITY_REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
     smpl (obs >= i - LIQUIDITY_REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
     #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
-    ols d_PRICE sells buys --quiet
+    scalar LAMBDA = 1 / (100 + 1)
+    series age_span = index[$t2] - index
+    series w = exp(-LAMBDA * age_span)
+    
+    wls w d_PRICE sells buys --quiet
+    
     if rows($coeff) == 2
         coeffSells[i] = $coeff[1]
         coeffBuys[i] = $coeff[2]
@@ -163,7 +170,6 @@ matrix d_flow_sign_full = d_flow_sign
 series avgFlow
 series avgFlowUpperEst
 series avgFlowLowerEst
-genr index
 
 series trend_length
 series trend_size
@@ -189,7 +195,7 @@ foreign language=R --send-data
 	        ar_fit <- ar(segment, order.max = 50)
 	        resid <- ar_fit$resid
 			resid <- resid[(ar_fit$order + 1): length(resid)] # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
-	        res <- processStream(resid, "Mann-Whitney", ARL0=1000, startup=STARTUP, lambda=NA)
+	        res <- processStream(resid, "Mann-Whitney", ARL0=5000, startup=STARTUP, lambda=NA)
 	        cp_local <- as.matrix(res$changePoints)
 	        if (nrow(cp_local) > 0) {
 	            cp_global <- as.numeric(start + ar_fit$order + cp_local[1, 1] - 1)
@@ -325,7 +331,7 @@ foreign language=R --send-data
 	        ar_fit <- ar(segment, order.max = 50)
 	        resid <- ar_fit$resid
 			resid <- resid[(ar_fit$order + 1): length(resid)] # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
-	        res <- processStream(resid, "Mann-Whitney", ARL0=1000, startup=STARTUP, lambda=NA)
+	        res <- processStream(resid, "Mann-Whitney", ARL0=5000, startup=STARTUP, lambda=NA)
 	        cp_local <- as.matrix(res$changePoints)
 	        if (nrow(cp_local) > 0) {
 	            cp_global <- as.numeric(start + ar_fit$order + cp_local[1, 1] - 1)
