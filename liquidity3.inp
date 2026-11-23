@@ -25,7 +25,9 @@ endloop
 
 # --- Aggregation of d_flow_sign ---
 series d_flow_sign_sum_series = 0/0
+series d_flow_sum_series = 0/0
 scalar d_flow_sign_sum = 0
+scalar d_flow_sum = 0
 scalar buy_sum = 0
 scalar sell_sum = 0
 scalar cur_mcsec = TRADETIME_MSEC[1]
@@ -33,15 +35,18 @@ scalar cur_mcsec = TRADETIME_MSEC[1]
 loop i=1..$nobs --quiet
     if (TRADETIME_MSEC[i] != cur_mcsec)
         d_flow_sign_sum_series[i-1] = d_flow_sign_sum
+        d_flow_sum_series[i-1] = d_flow_sum
         sells[i-1] = sell_sum
         buys[i-1] = buy_sum
 
-        d_flow_sign_sum = d_flow_sign[i]        
+        d_flow_sign_sum = d_flow_sign[i]
+        d_flow_sum = d_flow[i]        
         buy_sum = d_flow_sign[i] == 1 ? 1 : 0
         sell_sum = d_flow_sign[i] == -1 ? -1 : 0
         cur_mcsec = TRADETIME_MSEC[i]
     else
         d_flow_sign_sum += d_flow_sign[i]
+        d_flow_sum += d_flow[i]
         buy_sum += (d_flow_sign[i] == 1 ? 1 : 0)
         sell_sum += (d_flow_sign[i] == -1 ? -1 : 0)
     endif
@@ -49,6 +54,7 @@ endloop
 # ------------------------------------------
 smpl ok(d_flow_sign_sum_series) == 1 --restrict --permanent
 d_flow_sign = d_flow_sign_sum_series
+d_flow = d_flow_sum_series
 
 series cumflowSign = cum(d_flow_sign)
 diff PRICE
