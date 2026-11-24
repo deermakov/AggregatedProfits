@@ -1,12 +1,12 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.23.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.24.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
 series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
 
 scalar STEP = 1
-scalar LIQUIDITY_REGRESS_WINDOW = 300 # = W (см. ниже), чтобы можно было сопоставлять ликвидность и энтропию flow
+scalar LIQUIDITY_REGRESS_WINDOW = 600 # = W (см. ниже), чтобы можно было сопоставлять ликвидность и энтропию flow
 
 series sells
 series buys
@@ -66,8 +66,8 @@ series perm_entropy_series
 foreign language=R --send-data
 	# Base R implementation to avoid dependency issues and improve speed
 	data_vec <- gretldata[,"d_flow_sign"]
-	m <- 4
-	W <- 300 # рекомендуется >= 5 * m!
+	m <- 5
+	W <- 600 # рекомендуется >= 5 * m!
 	n <- length(data_vec)
 	pe_results <- rep(0, n)
 
@@ -80,7 +80,7 @@ foreign language=R --send-data
 	# pattern structure.
 	# Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
 	# PE_LAMBDA = 0 reproduces the classic equal-weight permutation entropy.
-	OLDEST_ITEM_WEIGHT = 0.05 # Вес для самого старого наблюдения
+	OLDEST_ITEM_WEIGHT = 0.01 # Вес для самого старого наблюдения
 	LAMBDA <-  -log(OLDEST_ITEM_WEIGHT) / (W - 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
 	
 	if (n >= W) {
@@ -157,7 +157,7 @@ loop for (i = LIQUIDITY_REGRESS_WINDOW; i<=$t2; i+= STEP) --quiet
     smpl (obs >= i - LIQUIDITY_REGRESS_WINDOW + 1) && (obs <= i) --restrict --quiet
     #var 0 priceDiff ; numSells(0 to -1) numBuys(0 to -1) --nc
 
-    scalar OLDEST_ITEM_WEIGHT = 0.05 # Вес для самого старого наблюдения
+    scalar OLDEST_ITEM_WEIGHT = 0.01 # Вес для самого старого наблюдения
 	scalar LAMBDA = -ln(OLDEST_ITEM_WEIGHT) / (LIQUIDITY_REGRESS_WINDOW - 1) # скорость экспоненциального затухания весов счетчиков паттернов в пермутационной энтропии (0 = равные веса).
 
     series age_span = index[$t2] - index
@@ -407,11 +407,11 @@ endif
 series med_perm_entropy_series = median(perm_entropy_series)
 
 # --- Вычисляем время начала для графиков (время последнего события минус N минут)
-scalar N = 30
+scalar N = 60
 scalar last_idx = $nobs
 scalar target_time = t_sec[last_idx] - N * 60
 
-scalar found_idx
+scalar found_idx = 1
 loop i = last_idx..1 --decr -q
     # Ищем первое событие, которое произошло в целевое время или раньше
     if t_sec[i] <= target_time
