@@ -1,0 +1,144 @@
+clear 
+open C:\\_Work\\ML\\AggregatedProfits\\2026.11.25.txt
+setobs 1 1 --special-time-series
+
+series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
+series d_flow_sign = d_flow != 0 ? d_flow / abs(d_flow) : 0
+
+series sells
+series buys
+
+# --- Переводим строковый ряд TRADETIME в секунды от начала суток ---
+series t_sec
+loop i = 1..$nobs -q
+    string s = TRADETIME[i]
+    scalar h = 0
+    scalar m = 0
+    scalar sec = 0
+    # Разбираем строку формата "ч:мм:сс" или "чч:мм:сс"
+    sscanf(s, "%d:%d:%d", h, m, sec)
+    t_sec[i] = h * 3600 + m * 60 + sec
+endloop
+
+# --- Aggregation of d_flow_sign ---
+series d_flow_sign_sum_series = 0/0
+series d_flow_sum_series = 0/0
+scalar d_flow_sign_sum = 0
+scalar d_flow_sum = 0
+scalar buy_sum = 0
+scalar sell_sum = 0
+scalar cur_mcsec = TRADETIME_MSEC[1]
+
+loop i=1..$nobs --quiet
+    if (TRADETIME_MSEC[i] != cur_mcsec)
+        d_flow_sign_sum_series[i-1] = d_flow_sign_sum
+        d_flow_sum_series[i-1] = d_flow_sum
+        sells[i-1] = sell_sum
+        buys[i-1] = buy_sum
+
+        d_flow_sign_sum = d_flow_sign[i]
+        d_flow_sum = d_flow[i]        
+        buy_sum = d_flow_sign[i] == 1 ? 1 : 0
+        sell_sum = d_flow_sign[i] == -1 ? -1 : 0
+        cur_mcsec = TRADETIME_MSEC[i]
+    else
+        d_flow_sign_sum += d_flow_sign[i]
+        d_flow_sum += d_flow[i]
+        buy_sum += (d_flow_sign[i] == 1 ? 1 : 0)
+        sell_sum += (d_flow_sign[i] == -1 ? -1 : 0)
+    endif
+endloop
+# ------------------------------------------
+smpl ok(d_flow_sign_sum_series) == 1 --restrict --permanent
+d_flow_sign = d_flow_sign_sum_series
+d_flow = d_flow_sum_series
+
+series cumflowSign = cum(d_flow_sign)
+diff PRICE
+genr index
+
+# --- Multiscale Permutation Entropy Calculation ---
+series mpe_matrix
+
+foreign language=R --send-data
+	data_vec <- as.numeric(gretldata[,"d_flow_sign"])
+	n <- length(data_vec)
+	m <- 5 # количество наблюдений в одном пермутационном блоке
+	MAX_S <- 5 # MAX_SCALE определяет максимальный масштаб агрегации
+	STEP_N <- 20 # <--- Должно совпадать с GRETEL или задано здесь для расчетов
+	OLDEST_ITEM_WEIGHT <- 0.01
+	
+	# Матрица: строки - наблюдения, столбцы - масштабы
+	mpe_full <- matrix(0, nrow = n, ncol = MAX_S)
+
+	for (tau in 1:MAX_S) {
+		# 1. Coarse-graining (Агрегация путем усреднения)
+		if (tau == 1) {
+			coarse_vec <- data_vec
+		} else {
+			idx <- ceiling(seq_along(data_vec) / tau)
+			coarse_vec <- as.numeric(tapply(data_vec, idx, mean))
+		}
+		
+		n_c <- length(coarse_vec)
+
+		if (n_c >= m) {
+			# 2. Расчет накопленной Permutation Entropy
+			LAMBDA <- -log(OLDEST_ITEM_WEIGHT) / (W - 1)
+			coarse_pe_vals <- rep(0, n_c)
+
+			# Рассчитываем энтропию для каждого шага k с заданным шагом STEP_N
+			for (k in seq(m, n_c, by = STEP_N)) {
+				sub_vec <- coarse_vec[1:k]
+				segments <- embed(sub_vec, m)
+				perms <- apply(segments, 1, function(s) paste(order(s), collapse = ""))
+				norm_factor <- log2(factorial(m))
+
+				n_segments <- length(perms)
+				# Веса: последний сегмент имеет вес exp(-LAMBDA * 0) = 1, предыдущие убывают экспоненциально
+				weights <- exp(-LAMBDA * (n_segments - seq_len(n_segments)))
+				total_weight <- sum(weights)
+
+				wcounts <- tapply(weights, perms, sum)
+				probs <- wcounts / total_weight
+				probs <- probs[probs > 0]
+				current_pe <- (-sum(probs * log2(probs))) / norm_factor
+				
+				coarse_pe_vals[k] <- current_pe
+			}
+
+			# Forward fill: заполняем промежутки между шагами STEP_N, чтобы график был непрерывным
+			first_val_idx <- which(coarse_pe_vals > 0)[1]
+			if (!is.na(first_val_idx)) {
+				for (i in (first_val_idx + 1):n_c) {
+					if (coarse_pe_vals[i] == 0) {
+						coarse_pe_vals[i] <- coarse_pe_vals[i-1]
+					}
+				}
+			}
+
+			# Маппинг обратно на исходную размерность n через векторизацию
+			k_vec <- ceiling((1:n) / tau)
+			mpe_full[, tau] <- coarse_pe_vals[pmin(k_vec, n_c)]
+		} else {
+			mpe_full[, tau] <- 0
+		}
+	}
+
+	gretl.export(mpe_full)
+	on.exit(closeAllConnections())
+end foreign
+
+catch matrix mpe_all = mread("mpe_full.mat", 1)
+if !$error
+    # Для обратной совместимости: первая колонка - это стандартная PE (масштаб 1)
+    series perm_entropy_series_1 = mpe_all[, 1]
+    series perm_entropy_series_2 = mpe_all[, 2]
+    series perm_entropy_series_3 = mpe_all[, 3]
+    series perm_entropy_series_4 = mpe_all[, 4]
+    series perm_entropy_series_5 = mpe_all[, 5]
+endif
+# --------------------------------------
+
+list list1 = perm_entropy_series_1 perm_entropy_series_2 perm_entropy_series_3 perm_entropy_series_4 perm_entropy_series_5
+gnuplot list1 --time-series --output=display --with-lines
