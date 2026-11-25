@@ -66,7 +66,7 @@ foreign language=R --send-data
 	m <- 5 # количество наблюдений в одном пермутационном блоке
 	MAX_S <- 5 # MAX_SCALE определяет максимальный масштаб агрегации
 	STEP_N <- 20 # <--- Должно совпадать с GRETEL или задано здесь для расчетов
-	OLDEST_ITEM_WEIGHT <- 0.01
+	HALF_LIFE <- 100
 	
 	# Матрица: строки - наблюдения, столбцы - масштабы
 	mpe_full <- matrix(0, nrow = n, ncol = MAX_S)
@@ -84,7 +84,7 @@ foreign language=R --send-data
 
 		if (n_c >= m) {
 			# 2. Расчет накопленной Permutation Entropy
-			LAMBDA <- -log(OLDEST_ITEM_WEIGHT) / (W - 1)
+			LAMBDA <- log(2) / HALF_LIFE # Half-life of a pattern's weight: ln(2)/PE_LAMBDA.
 			coarse_pe_vals <- rep(0, n_c)
 
 			# Рассчитываем энтропию для каждого шага k с заданным шагом STEP_N
