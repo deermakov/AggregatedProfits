@@ -1,5 +1,5 @@
 clear 
-open C:\\_Work\\ML\\AggregatedProfits\\2026.11.25.txt
+open C:\\_Work\\ML\\AggregatedProfits\\2026.11.26.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -50,6 +50,8 @@ loop i=1..$nobs --quiet
 endloop
 # ------------------------------------------
 smpl ok(d_flow_sign_sum_series) == 1 --restrict --permanent
+setobs 1 1 --special-time-series
+
 d_flow_sign = d_flow_sign_sum_series
 d_flow = d_flow_sum_series
 
@@ -65,8 +67,7 @@ foreign language=R --send-data
 	n <- length(data_vec)
 	m <- 5 # количество наблюдений в одном пермутационном блоке
 	MAX_S <- 5 # MAX_SCALE определяет максимальный масштаб агрегации
-	STEP_N <- 20 # <--- Должно совпадать с GRETEL или задано здесь для расчетов
-	HALF_LIFE <- 100
+	HALF_LIFE <- 90 # соответствует окну шириной 600 с oldest weight = 0.01 в нем
 	
 	# Матрица: строки - наблюдения, столбцы - масштабы
 	mpe_full <- matrix(0, nrow = n, ncol = MAX_S)
@@ -88,6 +89,7 @@ foreign language=R --send-data
 			coarse_pe_vals <- rep(0, n_c)
 
 			# Рассчитываем энтропию для каждого шага k с заданным шагом STEP_N
+			STEP_N <- ceiling(20 / tau) # чтобы ступеньки на разных масштабах были синхронизированы
 			for (k in seq(m, n_c, by = STEP_N)) {
 				sub_vec <- coarse_vec[1:k]
 				segments <- embed(sub_vec, m)
@@ -141,4 +143,4 @@ endif
 # --------------------------------------
 
 list list1 = perm_entropy_series_1 perm_entropy_series_2 perm_entropy_series_3 perm_entropy_series_4 perm_entropy_series_5
-gnuplot list1 --time-series --output=display --with-lines
+gnuplot list1 --time-series --output=display --with-lines {set terminal pngcairo size 1600,600;}
