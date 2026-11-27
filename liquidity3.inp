@@ -1,5 +1,5 @@
 clear 
-open C:\_Work\ML\AggregatedProfits\2026.11.26.txt
+open C:\_Work\ML\AggregatedProfits\2026.11.27.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -404,11 +404,47 @@ else
 endif
 # --- of Поиск структурных разрывов d_smartOBV  ---
 
+# --- Предсказание d_flow_sign по AR-модели ---
+foreign language=R --send-data
+	d <- gretldata[,"d_flow_sign"]
+	ar_fit <- ar(d, order.max = 50)
+
+	H <- 100  # Горизонт прогноза (можно менять)
+	pred_obj <- predict(ar_fit, n.ahead = H)
+	vals <- pred_obj$pred
+	se   <- pred_obj$se
+	upper <- vals + 1.96 * se  # 95% доверительный интервал
+	lower <- vals - 1.96 * se
+	
+	flow_forecast <- matrix(NA, nrow = H, ncol = 3)
+	
+	# Заполняем прогноз и границы в конце матрицы (начиная с n+1)
+	flow_forecast[, 1] <- vals
+	flow_forecast[, 2] <- upper
+	flow_forecast[, 3] <- lower
+	
+	gretl.export(flow_forecast)
+#	m_resid <- as.matrix(resid)
+#	gretl.export(m_resid)
+	on.exit(closeAllConnections())
+end foreign
+catch matrix flow_forecast = mread("flow_forecast.mat", 1)
+
+scalar FORECAST_HORIZON = 100 # равно тому, что в H выше
+scalar n = $nobs
+dataset addobs FORECAST_HORIZON
+smpl obs > n --restrict
+d_flow_sign = flow_forecast[,1]
+smpl full
+cumflowSign = cum(d_flow_sign)
+
+# --- of Предсказание d_flow_sign по AR-модели ---
+
 series med_perm_entropy_series = median(perm_entropy_series)
 
 # --- Вычисляем время начала для графиков (время последнего события минус N минут)
 scalar N = 60
-scalar last_idx = $nobs
+scalar last_idx = $nobs - FORECAST_HORIZON
 scalar target_time = t_sec[last_idx] - N * 60
 
 scalar found_idx = 1
