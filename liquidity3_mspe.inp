@@ -1,5 +1,5 @@
 clear 
-open C:\\_Work\\ML\\AggregatedProfits\\2026.11.26.txt
+open C:\\_Work\\ML\\AggregatedProfits\\2026.11.27.txt
 setobs 1 1 --special-time-series
 
 series d_flow = (BUYSELL == "BUY") ? QTY : -QTY
@@ -58,6 +58,23 @@ d_flow = d_flow_sum_series
 series cumflowSign = cum(d_flow_sign)
 diff PRICE
 genr index
+
+# --- Энтропию будем считать не на исходном d_flow_sign, а на остатках AR-модели по нему (= анализ инноваций на наличие структуры ) ---
+foreign language=R --send-data
+	d <- gretldata[,"d_flow_sign"]
+	ar_fit <- ar(d, order.max = 50)
+	resid <- ar_fit$resid
+	#resid <- resid[(ar_fit$order + 1): length(resid)] # первые наблюдения (в клоичестве, равном выбранному лагу AR) будут содержать значение NA
+	resid[is.na(resid)] <- 0
+	m_resid <- as.matrix(resid)
+	gretl.export(m_resid)
+	on.exit(closeAllConnections())
+end foreign
+catch matrix m_resid = mread("m_resid.mat", 1)
+
+d_flow_sign = m_resid
+
+# --- of Энтропию будем считать не на исходном d_flow_sign, а на остатках AR-модели по нему ---
 
 # --- Multiscale Permutation Entropy Calculation ---
 series mpe_matrix
