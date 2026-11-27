@@ -159,5 +159,5 @@ if !$error
 endif
 # --------------------------------------
 
-list list1 = perm_entropy_series_1 perm_entropy_series_2 perm_entropy_series_3 perm_entropy_series_4 perm_entropy_series_5
-gnuplot list1 --time-series --output=display --with-lines {set terminal pngcairo size 1600,600;}
+list list1 = cumflowSign perm_entropy_series_1 perm_entropy_series_2 perm_entropy_series_3 perm_entropy_series_4 perm_entropy_series_5
+gnuplot list1 --time-series --output=display --with-lines {set terminal pngcairo size 1600,600; plot '-' using 1:($2) axes x1y2 w lines, '-' using 1:($2) axes x1y1 w lines, '-' using 1:($2) axes x1y1 w lines, '-' using 1:($2) axes x1y1 w lines, '-' using 1:($2) axes x1y1 w lines, '-' using 1:($2) axes x1y1 w lines}
